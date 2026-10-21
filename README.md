@@ -35,6 +35,29 @@ It calls the `herdr` CLI rather than faking keystrokes, so it acts on whichever 
 
 Hover over the sheep to see how many agents are blocked or done. Viewing a finished agent in herdr clears its badge.
 
+### Several machines
+
+<p align="center">
+  <img src="screenshots/machines.png" width="366" alt="The menu with agents on this Mac and on a saved machine, build-box, each under its own heading">
+</p>
+
+If you've saved SSH machines with `herdr machine add`, the sheep's badge counts agents on all of them. **Machines** chooses how the menu shows them:
+
+- **All together** (default): each enabled machine's agents under their own heading, and every machine's workspaces. The Workspace, Tab and Pane actions act on the machine the herdr TUI is showing, or Local, named in their headers.
+- **One at a time**: a **Machine** section at the top picks one machine, and the rest of the menu shows and acts on just that one.
+
+Everything goes through `herdr --machine <id> ...`, so it needs herdr 0.9.5 or later on both ends. A machine that doesn't answer within 3 seconds shows as *Not reachable*.
+
+Clicking a remote agent moves focus on that machine's server. You only see it if your TUI is showing that machine, because the CLI can't switch the TUI's machine for you.
+
+### Settings
+
+- **Show**: agents and workspaces (default), agents only, or workspaces only.
+- **Actions**: turn the Workspace, Tab and Pane action sections on or off (all on by default). The workspace list from **Show** stays either way.
+- **Machines**: all together or one at a time (only with saved SSH machines).
+
+These are stored in the app's defaults, e.g. `defaults write dev.pierre-charles.herdr-menu show agents` or `defaults write dev.pierre-charles.herdr-menu actions.pane off`.
+
 ## Requirements
 
 - macOS 14 or later
