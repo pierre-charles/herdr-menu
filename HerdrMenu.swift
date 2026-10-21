@@ -244,22 +244,27 @@ func label(_ title: String, icon: String, keys: (String, String) = ("", ""), tin
     return s
 }
 
-func hex(_ v: Int) -> NSColor {
-    NSColor(srgbRed: CGFloat(v >> 16 & 0xff) / 255, green: CGFloat(v >> 8 & 0xff) / 255, blue: CGFloat(v & 0xff) / 255, alpha: 1)
+// Catppuccin Mocha on dark menus. On light ones Mocha's pastels wash out (about 1:1), so Latte's hues,
+// darkened where needed to reach 3:1 against the light menu's grey (~#d5d6de)
+func hex(dark: Int, light: Int) -> NSColor {
+    NSColor(name: nil) { appearance in
+        let v = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+        return NSColor(srgbRed: CGFloat(v >> 16 & 0xff) / 255, green: CGFloat(v >> 8 & 0xff) / 255, blue: CGFloat(v & 0xff) / 255, alpha: 1)
+    }
 }
 
 // Agent status -> SF Symbol and colour, matching herdr's sidebar dots (src/client/shell.rs status_icon/status_color),
 // in herdr's sort order (status_priority): blocked first, then done, working, idle, anything else last.
-// ponytail: Catppuccin Mocha hard-coded, herdr's default theme; read [theme] from config.toml if I switch themes.
+// ponytail: Catppuccin hard-coded, herdr's default theme; read [theme] from config.toml if I switch themes.
 let statusStyles: [(status: String, symbol: String, color: NSColor)] = [
-    ("blocked", "circlebadge.fill", hex(0xf38ba8)), // red
-    ("done", "circlebadge.fill", hex(0x94e2d5)), // teal
-    ("working", "circlebadge.fill", hex(0xf9e2af)), // yellow
-    ("idle", "circlebadge", hex(0xa6e3a1)), // green
+    ("blocked", "circlebadge.fill", hex(dark: 0xf38ba8, light: 0xd20f39)), // red
+    ("done", "circlebadge.fill", hex(dark: 0x94e2d5, light: 0x148187)), // teal
+    ("working", "circlebadge.fill", hex(dark: 0xf9e2af, light: 0xa26715)), // yellow
+    ("idle", "circlebadge", hex(dark: 0xa6e3a1, light: 0x358423)), // green
 ]
 
 func style(_ status: String?) -> (symbol: String, color: NSColor) {
-    statusStyles.first { $0.status == status }.map { ($0.symbol, $0.color) } ?? ("circle.dotted", hex(0x6c7086)) // overlay0
+    statusStyles.first { $0.status == status }.map { ($0.symbol, $0.color) } ?? ("circle.dotted", hex(dark: 0x6c7086, light: 0x6c7086)) // overlay0, 3.4:1 on light too
 }
 
 func rank(_ status: String?) -> Int {
@@ -313,7 +318,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let color = blocked > 0 ? style("blocked").color : done > 0 ? style("done").color : nil
         button.image = color == nil ? icon : notched
         dot.isHidden = color == nil
-        dot.layer?.backgroundColor = color?.cgColor
+        // A CGColor is fixed when read, so resolve it for the menu bar's look (it can be dark in light mode)
+        button.effectiveAppearance.performAsCurrentDrawingAppearance { self.dot.layer?.backgroundColor = color?.cgColor }
         // Same spot as the notch: the icon's bottom-right corner, wherever the button centres it
         let x0 = (button.bounds.width - iconSize) / 2, y0 = (button.bounds.height - iconSize) / 2
         dot.frame = NSRect(x: x0 + iconSize - dotSize, y: button.isFlipped ? y0 + iconSize - dotSize : y0,
