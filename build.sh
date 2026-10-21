@@ -32,3 +32,9 @@ PLIST
 # Ad-hoc signature over the whole bundle (no developer account needed); macOS login items check it
 codesign --force --sign - "$bundle"
 echo "Built $bundle"
+# If the old build is running, swap it for the new one (waiting for it to quit, or open would just refocus it)
+if pkill -x HerdrMenu; then
+  while pgrep -qx HerdrMenu; do sleep 0.1; done
+  open "$bundle"
+  echo "Restarted HerdrMenu"
+fi

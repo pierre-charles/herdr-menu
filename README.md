@@ -59,7 +59,7 @@ git pull
 ./build.sh
 ```
 
-Then choose **Quit** from the menu and run `open ~/Applications/HerdrMenu.app` again.
+`build.sh` restarts the app if it's running, so the new version takes over straight away.
 
 ## Uninstall
 
