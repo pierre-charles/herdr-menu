@@ -372,7 +372,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_: Notification) {
         icon = Bundle.main.image(forResource: "sheep")
             ?? NSImage(systemSymbolName: "rectangle.split.3x1", accessibilityDescription: "herdr")!
-        icon.size = NSSize(width: iconSize, height: iconSize)
+        // sheep.png is trimmed to the sheep, so keep its shape and the button centres what you see
+        icon.size = NSSize(width: iconSize, height: iconSize * icon.size.height / icon.size.width)
         icon.isTemplate = true
         notched = NSImage(size: icon.size, flipped: false) { [icon, iconSize, dotSize, notchSize] r in
             icon.draw(in: r)
@@ -423,8 +424,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // A CGColor is fixed when read, so resolve it for the menu bar's look (it can be dark in light mode)
         button.effectiveAppearance.performAsCurrentDrawingAppearance { self.dot.layer?.backgroundColor = color?.cgColor }
         // Same spot as the notch: the icon's bottom-right corner, wherever the button centres it
-        let x0 = (button.bounds.width - iconSize) / 2, y0 = (button.bounds.height - iconSize) / 2
-        dot.frame = NSRect(x: x0 + iconSize - dotSize, y: button.isFlipped ? y0 + iconSize - dotSize : y0,
+        let w = icon.size.width, h = icon.size.height
+        let x0 = (button.bounds.width - w) / 2, y0 = (button.bounds.height - h) / 2
+        dot.frame = NSRect(x: x0 + w - dotSize, y: button.isFlipped ? y0 + h - dotSize : y0,
                            width: dotSize, height: dotSize)
         let counts = [(blocked, "blocked"), (done, "done")].filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }
         button.toolTip = counts.isEmpty ? "herdr" : "Agents: " + counts.joined(separator: ", ")
