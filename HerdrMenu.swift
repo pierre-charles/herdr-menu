@@ -289,7 +289,13 @@ func label(_ title: String, icon: String, keys: (String, String) = ("", ""), tin
     }
     let s = NSMutableAttributedString(attachment: att)
     s.addAttributes(attrs, range: NSRange(location: 0, length: s.length))
-    s.append(NSAttributedString(string: "\t" + title, attributes: attrs))
+    // Cut the title by width, not characters: text past a tab stop wraps the rest onto a second line
+    let room = 200 - 26 - (keys.0 as NSString).size(withAttributes: attrs).width - 12
+    var fitted = title
+    while fitted.count > 1, (fitted as NSString).size(withAttributes: attrs).width > room {
+        fitted = title.prefix(fitted.count - 2) + "…"
+    }
+    s.append(NSAttributedString(string: "\t" + fitted, attributes: attrs))
     s.append(NSAttributedString(string: "\t\(keys.0)\t\(keys.1)", attributes: attrs.merging([.foregroundColor: NSColor.secondaryLabelColor]) { $1 }))
     return s
 }
@@ -567,8 +573,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // An agent or workspace row: herdr's status dot, name, grey detail, checkmark when focused
     func listRow(_ title: String, detail: String, status: String?, focused: Bool?, command: Command) -> NSMenuItem {
         let (symbol, color) = style(status)
-        // short() keeps the detail column straight
-        let mi = menuItem(short(title, 26), icon: symbol, keys: ("", short(detail, 30)), tint: color, command: command)
+        let mi = menuItem(title, icon: symbol, keys: ("", short(detail, 30)), tint: color, command: command)
         mi.state = focused == true ? .on : .off
         return mi
     }
