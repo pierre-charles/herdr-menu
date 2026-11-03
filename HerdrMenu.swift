@@ -2,32 +2,61 @@ import AppKit
 import ServiceManagement
 
 // herdr's install script uses ~/.local/bin; Homebrew uses /opt/homebrew/bin (Apple silicon) or /usr/local/bin
-let herdr = [NSHomeDirectory() + "/.local/bin/herdr", "/opt/homebrew/bin/herdr", "/usr/local/bin/herdr"]
+let herdrCLI = [NSHomeDirectory() + "/.local/bin/herdr", "/opt/homebrew/bin/herdr", "/usr/local/bin/herdr"]
     .first(where: FileManager.default.isExecutableFile) ?? "herdr"
+// The rex CLI lives in Rex's server bundle, which puts it on PATH; a GUI app doesn't get that PATH
+let rexCLI = [NSHomeDirectory() + "/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+              NSHomeDirectory() + "/.local/bin/rex", "/opt/homebrew/bin/rex", "/usr/local/bin/rex"]
+    .first(where: FileManager.default.isExecutableFile) ?? "rex"
+// Rex and Rex Beta share it
+let rexBundle = "com.superlogical.rex"
+
+// MARK: - Backends
+
+// The multiplexer the menu drives, picked at the top of the menu. Rex calls herdr's workspaces sessions,
+// its tabs windows (the app shows them as tabs), its panes blocks and its machines hosts.
+enum Backend: String {
+    case herdr, rex
+    var title: String { self == .herdr ? "herdr" : "Rex" }
+    var exe: String { self == .herdr ? herdrCLI : rexCLI }
+    var local: Machine { Machine(id: nil, name: "Local", backend: self) }
+
+    // A menu title in this backend's words
+    func words(_ s: String) -> String {
+        guard self == .rex else { return s }
+        return [("Workspace", "Session"), ("workspace", "session"), ("Machine", "Host"), ("machine", "host")]
+            .reduce(s) { $0.replacingOccurrences(of: $1.0, with: $1.1) }
+    }
+}
 
 // MARK: - Menu actions
 
-// (title, SF Symbol, herdr keybinding action, CLI args). The keybind shown comes from Keybinds below.
+// (title, SF Symbol, keybinding action, CLI args). The keybind shown comes from Keybinds or RexKeymap below.
 // "{pane}", "{tab}", "{workspace}" become the focused ids at click time; "{label}" prompts for a name.
 typealias Action = (title: String, icon: String, binding: String, args: [String])
+typealias Submenu = (title: String, icon: String, actions: [Action])
 
-// The rows of a "Focus ›" style submenu, one per direction; herdr names the actions focus_pane_left etc.
-func directionRows(_ verb: String, icons: [String]) -> [Action] {
-    zip(["left", "right", "up", "down"], icons).map { dir, icon in (dir.capitalized, icon, "\(verb)_pane_\(dir)", ["pane", verb, "--direction", dir]) }
+// The rows of a "Focus ›" style submenu, one per direction, each with its binding and args
+func directionRows(_ icons: [String], _ command: (String) -> (binding: String, args: [String])) -> [Action] {
+    zip(["left", "right", "up", "down"], icons).map { dir, icon in
+        let c = command(dir)
+        return (dir.capitalized, icon, c.binding, c.args)
+    }
 }
+let focusIcons = ["rectangle.lefthalf.filled", "rectangle.righthalf.filled", "rectangle.tophalf.filled", "rectangle.bottomhalf.filled"]
+let resizeIcons = ["arrow.left.to.line", "arrow.right.to.line", "arrow.up.to.line", "arrow.down.to.line"]
+let swapIcons = ["arrow.left.arrow.right", "arrow.left.arrow.right", "arrow.up.arrow.down", "arrow.up.arrow.down"]
 
+// herdr names the actions focus_pane_left etc.
 let paneActions: [Action] = [
     ("Split right", "rectangle.split.2x1", "split_vertical", ["pane", "split", "--direction", "right", "--focus"]),
     ("Split down", "rectangle.split.1x2", "split_horizontal", ["pane", "split", "--direction", "down", "--focus"]),
     ("Toggle zoom", "arrow.up.left.and.arrow.down.right", "zoom", ["pane", "zoom", "--toggle"]),
 ]
-let paneSubmenus: [(title: String, icon: String, actions: [Action])] = [
-    ("Focus", "rectangle.lefthalf.inset.filled",
-     directionRows("focus", icons: ["rectangle.lefthalf.filled", "rectangle.righthalf.filled", "rectangle.tophalf.filled", "rectangle.bottomhalf.filled"])),
-    ("Resize", "arrow.up.and.down.and.arrow.left.and.right",
-     directionRows("resize", icons: ["arrow.left.to.line", "arrow.right.to.line", "arrow.up.to.line", "arrow.down.to.line"])),
-    ("Swap", "rectangle.2.swap",
-     directionRows("swap", icons: ["arrow.left.arrow.right", "arrow.left.arrow.right", "arrow.up.arrow.down", "arrow.up.arrow.down"])),
+let paneSubmenus: [Submenu] = [
+    ("Focus", "rectangle.lefthalf.inset.filled", directionRows(focusIcons) { ("focus_pane_\($0)", ["pane", "focus", "--direction", $0]) }),
+    ("Resize", "arrow.up.and.down.and.arrow.left.and.right", directionRows(resizeIcons) { ("resize_pane_\($0)", ["pane", "resize", "--direction", $0]) }),
+    ("Swap", "rectangle.2.swap", directionRows(swapIcons) { ("swap_pane_\($0)", ["pane", "swap", "--direction", $0]) }),
 ]
 let closePane: Action = ("Close pane", "xmark.square", "close_pane", ["pane", "close", "{pane}"])
 let tabActions: [Action] = [
@@ -39,6 +68,32 @@ let workspaceActions: [Action] = [
     ("New workspace…", "macwindow.badge.plus", "new_workspace", ["workspace", "create", "--label", "{label}", "--focus"]),
     ("Rename workspace", "square.and.pencil", "rename_workspace", ["workspace", "rename", "{workspace}", "{label}"]),
     ("Close workspace", "rectangle.badge.xmark", "close_workspace", ["workspace", "close", "{workspace}"]),
+]
+
+// Rex: the app's own actions (`rex do pane.zoom`), which act on whatever has focus in the Rex app, so no ids.
+// Renaming is the app's inline rename, and Rex's swap is Move. The binding is the action, with
+// pane.resize's direction folded in as for the dotted ones.
+func rexDo(_ action: String, _ args: String...) -> [String] { ["do", action] + args }
+let rexPaneActions: [Action] = [
+    ("Split right", "rectangle.split.2x1", "pane.split.right", rexDo("pane.split.right")),
+    ("Split down", "rectangle.split.1x2", "pane.split.down", rexDo("pane.split.down")),
+    ("Toggle zoom", "arrow.up.left.and.arrow.down.right", "pane.zoom", rexDo("pane.zoom")),
+]
+let rexPaneSubmenus: [Submenu] = [
+    ("Focus", "rectangle.lefthalf.inset.filled", directionRows(focusIcons) { ("pane.focus.\($0)", rexDo("pane.focus.\($0)")) }),
+    ("Resize", "arrow.up.and.down.and.arrow.left.and.right", directionRows(resizeIcons) { ("pane.resize.\($0)", rexDo("pane.resize", "direction=\($0)")) }),
+    ("Move", "rectangle.2.swap", directionRows(swapIcons) { ("pane.move.\($0)", rexDo("pane.move.\($0)")) }),
+]
+let rexClosePane: Action = ("Close pane", "xmark.square", "pane.close", rexDo("pane.close"))
+let rexTabActions: [Action] = [
+    ("New tab", "plus.rectangle.on.rectangle", "client.tab.new", rexDo("client.tab.new")),
+    ("Rename tab", "pencil", "client.tab.rename", rexDo("client.tab.rename")),
+    ("Close tab", "xmark.rectangle", "client.tab.close", rexDo("client.tab.close")),
+]
+let rexSessionActions: [Action] = [
+    ("New session", "macwindow.badge.plus", "session.new", rexDo("session.new")),
+    ("Rename session", "square.and.pencil", "session.rename", rexDo("session.rename")),
+    ("Close session", "rectangle.badge.xmark", "session.close", rexDo("session.close")),
 ]
 
 // MARK: - Keybinds
@@ -122,16 +177,52 @@ struct Keybinds {
     static func symbol(_ key: String) -> String { keyNames[key] ?? key.uppercased() }
 }
 
+// Rex's bindings as the server resolves them (`rex keymap --json`): init.lua's only, because the app's
+// built-in shortcuts and the ones set in the app never reach the server.
+struct RexKeymap {
+    struct Binding: Decodable {
+        struct Args: Decodable { let direction: String? }
+        let keys: [String]
+        let action: String?
+        let args: Args?
+    }
+    struct Keymap: Decodable { let bindings: [Binding] }
+    static let aliases = ["command": "cmd", "super": "cmd", "meta": "cmd", "win": "cmd", "control": "ctrl",
+                          "opt": "alt", "option": "alt", "escape": "esc"]
+
+    var keys: [String: String] = [:] // action (pane.resize.left for pane.resize with direction left) -> key
+
+    init(json: Data) {
+        // Listed top of each key's stack first, so the first binding for an action is the live one
+        for b in (try? decoder.decode(Keymap.self, from: json))?.bindings ?? [] {
+            guard let action = b.action, let key = b.keys.first else { continue }
+            let name = b.args?.direction.map { "\(action).\($0)" } ?? action
+            if keys[name] == nil { keys[name] = key.lowercased() }
+        }
+    }
+
+    // (modifier column, key column) like herdr's: a sequence such as ctrl+b>c shows its leading keys first
+    func keys(for action: String) -> (String, String) {
+        guard let key = keys[action] else { return ("", "") }
+        let shown = key.split(separator: ">").map { k in
+            Keybinds(toml: "").display(k.split(separator: "+").map { Self.aliases[String($0)] ?? String($0) }.joined(separator: "+"))
+        }
+        guard let last = shown.last else { return ("", "") }
+        return shown.count == 1 ? last : (shown.dropLast().map { $0.0 + $0.1 }.joined(), last.0 + last.1)
+    }
+}
+
 // MARK: - herdr
 
 // timeout: kill the call after this many seconds, for remote machines whose SSH link may hang
-func run(_ args: [String], exe: String = herdr, timeout: TimeInterval? = nil) -> (ok: Bool, out: Data, err: String) {
+func run(_ args: [String], exe: String = herdrCLI, timeout: TimeInterval? = nil) -> (ok: Bool, out: Data, err: String) {
     let p = Process(), out = Pipe(), err = Pipe()
     p.executableURL = URL(fileURLWithPath: exe)
     p.arguments = args
     // Drop herdr's caller context (HERDR_PANE_ID etc.) in case this app was launched from a herdr pane:
     // the CLI would treat that pane as the caller, so "current pane" and splits would ignore what's focused.
-    p.environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("HERDR_") }
+    // Rex's (REX_SESSION, REX_BLOCK) likewise.
+    p.environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("HERDR_") && !$0.key.hasPrefix("REX_") }
     p.standardOutput = out
     p.standardError = err
     do { try p.run() } catch { return (false, Data(), error.localizedDescription) }
@@ -181,18 +272,95 @@ func herdrResult(_ args: [String], timeout: TimeInterval? = nil) -> Result? {
     try? decoder.decode(Response.self, from: run(args, timeout: timeout).out).result
 }
 
+// Rex has no snapshot call, so this script builds herdr's from the server API: sessions as workspaces,
+// windows as tabs, blocks as panes, and a terminal whose program reports a status (OSC 7501, as Claude Code
+// does) as an agent, with its most urgent record. Rex doesn't say which session the app is showing, so
+// nothing is focused. Viewing a session needs attaching to it first. `rex do` prints the returned text as a JSON string.
+// ponytail: an empty Lua table encodes as {}, so ":{}" becomes ":[]", which a label containing ":{} would hit too.
+let rexSnapshotScript = """
+local term = "com.superlogical.terminal"
+local rank = {blocked = 1, done = 2, working = 3, idle = 4}
+local function urgent(a, b)
+  if a == nil or b == nil then return a or b end
+  return (rank[a] or 5) <= (rank[b] or 5) and a or b
+end
+local snap = {workspaces = {}, tabs = {}, agents = {}, panes = {}}
+for _, s in ipairs((rex.call("session.attach_all", {event_scope = "session"}) or {}).sessions or {}) do
+  local ws = {workspace_id = s.session_id, label = s.label, pane_count = 0}
+  for _, w in ipairs((rex.call("session.view", {session_id = s.session_id}) or {}).windows or {}) do
+    local tab = {workspace_id = s.session_id, tab_id = w.window_id, label = w.label, pane_count = 0}
+    for _, layer in ipairs(w.layers or {}) do
+      for _, b in ipairs(layer.blocks or {}) do
+        local pane = {pane_id = b.block_id, tab_id = w.window_id, workspace_id = s.session_id, terminal_title_stripped = b.label}
+        if b.creator_name == term then
+          local at = {session_id = s.session_id, block_id = b.block_id}
+          pane.terminal_title_stripped = (rex.call(term .. ".title", at) or {}).title
+          local pwd = (rex.call(term .. ".pwd", at) or {}).pwd
+          pane.cwd = pwd and pwd:gsub("^file://[^/]*", "")
+          for _, r in ipairs((rex.call(term .. ".program_status", at) or {}).records or {}) do
+            pane.agent = pane.agent or r.effective_app or "program"
+            pane.agent_status = urgent(pane.agent_status, r.state)
+          end
+        end
+        tab.pane_count = tab.pane_count + 1
+        table.insert(snap.panes, pane)
+        if pane.agent then
+          table.insert(snap.agents, pane)
+          tab.agent_status = urgent(tab.agent_status, pane.agent_status)
+        end
+      end
+    end
+    ws.pane_count = ws.pane_count + tab.pane_count
+    ws.agent_status = urgent(ws.agent_status, tab.agent_status)
+    table.insert(snap.tabs, tab)
+  end
+  table.insert(snap.workspaces, ws)
+end
+return (rex.json.encode({result = {snapshot = snap}}):gsub(":{}", ":[]"))
+"""
+
+// Show a session in the Rex app, and focus a block in it first (which also makes its window active)
+let rexShowScript = """
+local a = rex.args
+rex.session.attach{session_id = a.session}
+if a.block then rex.call("session.focus_block", {session_id = a.session, block_id = a.block}) end
+rex.client.queue("session.select", {session_id = a.session, window_id = a.window})
+"""
+func rexShow(session: String, window: String? = nil, block: String? = nil) -> [String] {
+    ["do", "-e", rexShowScript, "session=" + session] + [window.map { "window=" + $0 }, block.map { "block=" + $0 }].compactMap { $0 }
+}
+
 // MARK: - Machines
 
 // A herdr server the menu talks to: this Mac's own (id nil), or a saved SSH machine reached with
 // `herdr --machine <id> ...` (herdr 0.9.5+ forwards the socket API over its SSH link).
+// For Rex, a host from `rex hosts`, reached with `rex -S <label> ...`.
 struct Machine: Equatable {
     let id: String?
     let name: String
-    static let local = Machine(id: nil, name: "Local")
+    var backend = Backend.herdr
+    static let local = Backend.herdr.local
 
-    func cmd(_ args: [String]) -> [String] { (id.map { ["--machine", $0] } ?? []) + args }
-    // Remote calls go over SSH; don't let a dead link hang the menu
-    func result(_ args: [String]) -> Result? { herdrResult(cmd(args), timeout: id == nil ? nil : 3) }
+    func cmd(_ args: [String]) -> [String] { (id.map { [backend == .herdr ? "--machine" : "-S", $0] } ?? []) + args }
+    // Remote calls go over SSH or the network; don't let a dead link hang the menu
+    var timeout: TimeInterval? { id == nil ? nil : 3 }
+    func result(_ args: [String]) -> Result? { herdrResult(cmd(args), timeout: timeout) }
+
+    func snapshot() -> Snapshot? {
+        guard backend == .rex else { return result(["api", "snapshot"])?.snapshot }
+        let text = try? decoder.decode(String.self, from: run(cmd(["do", "-e", rexSnapshotScript]), exe: rexCLI, timeout: timeout).out)
+        return text.flatMap { try? decoder.decode(Response.self, from: Data($0.utf8)) }?.result.snapshot
+    }
+    func agents() -> [Pane]? { backend == .herdr ? result(["agent", "list"])?.agents : snapshot()?.agents }
+}
+
+// `rex hosts list --json`
+struct RexHosts: Decodable {
+    struct Entry: Decodable {
+        struct Host: Decodable { let label: String }
+        let host: Host
+    }
+    let hosts: [Entry]
 }
 
 // `herdr machine list --json`
@@ -202,19 +370,24 @@ struct SavedMachine: Decodable {
     let selected: Bool? // the machine the herdr TUI is showing
 }
 
-// Local first, then every enabled saved machine; plus the one selected in the TUI, if any
-func loadMachines() -> (all: [Machine], selected: Machine?) {
+// Local first, then every enabled saved machine; plus the one selected in the TUI, if any.
+// Rex: Local, then every host. The app can show several hosts at once, so none is selected.
+func loadMachines(_ backend: Backend) -> (all: [Machine], selected: Machine?) {
+    if backend == .rex {
+        let hosts = (try? decoder.decode(RexHosts.self, from: run(["hosts", "list", "--json"], exe: rexCLI).out))?.hosts ?? []
+        return ([backend.local] + hosts.map { Machine(id: $0.host.label, name: $0.host.label, backend: .rex) }, nil)
+    }
     let saved = ((try? decoder.decode([SavedMachine].self, from: run(["machine", "list", "--json"]).out)) ?? []).filter(\.enabled)
     let machine = { (s: SavedMachine) in Machine(id: s.id, name: s.label) }
     return ([.local] + saved.map(machine), saved.first { $0.selected == true }.map(machine))
 }
 
-// The same command on every machine at once, results in the same order
-func fetch(_ machines: [Machine], _ args: [String]) -> [Result?] {
-    var out = [Result?](repeating: nil, count: machines.count)
+// The same call on every machine at once, results in the same order
+func fetch<T>(_ machines: [Machine], _ get: (Machine) -> T?) -> [T?] {
+    var out = [T?](repeating: nil, count: machines.count)
     let lock = NSLock()
     DispatchQueue.concurrentPerform(iterations: machines.count) { i in
-        let r = machines[i].result(args)
+        let r = get(machines[i])
         lock.withLock { out[i] = r }
     }
     return out
@@ -257,14 +430,21 @@ func herdrClientPID() -> String? {
 // bundle id in every child's environment as __CFBundleIdentifier (com.googlecode.iterm2 for iTerm2).
 // openApplication is what the Dock does, so it works from a menu bar app where activate() may not.
 // ponytail: raises the app's frontmost window, not necessarily the herdr one if the terminal has several.
-func bringTerminalForward() {
-    guard let pid = herdrClientPID() else { return }
-    let env = String(decoding: run(["eww", "-o", "command=", "-p", pid], exe: "/bin/ps").out, as: UTF8.self)
-    guard let entry = env.split(separator: " ").first(where: { $0.hasPrefix("__CFBundleIdentifier=") }),
-          let id = entry.split(separator: "=", maxSplits: 1).last,
-          let url = NSRunningApplication.runningApplications(withBundleIdentifier: String(id)).first?.bundleURL else { return }
+// Rex is its own app, so that's what comes forward.
+func bringTerminalForward(_ backend: Backend) {
+    var bundle = rexBundle
+    if backend == .herdr {
+        guard let pid = herdrClientPID() else { return }
+        let env = String(decoding: run(["eww", "-o", "command=", "-p", pid], exe: "/bin/ps").out, as: UTF8.self)
+        guard let entry = env.split(separator: " ").first(where: { $0.hasPrefix("__CFBundleIdentifier=") }),
+              let id = entry.split(separator: "=", maxSplits: 1).last else { return }
+        bundle = String(id)
+    }
+    guard let url = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first?.bundleURL else { return }
     NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
 }
+
+func rexAppRunning() -> Bool { !NSRunningApplication.runningApplications(withBundleIdentifier: rexBundle).isEmpty }
 
 // MARK: - Drawing
 
@@ -326,13 +506,14 @@ func rank(_ status: String?) -> Int {
 // Menu choices, stored in UserDefaults (`defaults write dev.pierre-charles.herdr-menu show agents` works too).
 // The first choice is the default.
 enum Setting {
-    static let show = "show", machines = "machines"
+    static let backend = "backend", show = "show", machines = "machines"
+    static let backendChoices: [(value: String, title: String)] = [(value: "herdr", title: "herdr"), ("rex", "Rex")]
     static let showChoices: [(value: String, title: String)] = [(value: "both", title: "Agents and workspaces"), ("agents", "Agents only"), ("workspaces", "Workspaces only")]
     static let machineChoices: [(value: String, title: String)] = [(value: "all", title: "All together"), ("one", "One at a time")]
     // Which action sections show, each "on" (default) or "off": actions.workspace, actions.tab, actions.pane
     static let sections = [("workspace", "Workspace actions"), ("tab", "Tab actions"), ("pane", "Pane actions")]
     static func section(_ kind: String) -> String { "actions." + kind }
-    static let defaults = [show: showChoices[0].value, machines: machineChoices[0].value]
+    static let defaults = [backend: backendChoices[0].value, show: showChoices[0].value, machines: machineChoices[0].value]
         .merging(sections.map { (section($0.0), "on") }) { $1 }
 }
 
@@ -340,23 +521,25 @@ func setting(_ key: String) -> String {
     UserDefaults.standard.string(forKey: key) ?? Setting.defaults[key] ?? ""
 }
 
+var backend: Backend { Backend(rawValue: setting(Setting.backend)) ?? .herdr }
+
 // MARK: - App
 
 final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     var icon = NSImage(), notched = NSImage()
     let dot = NSView()
-    var keybinds = Keybinds(toml: "")
+    var keys: (String) -> (String, String) = { _ in ("", "") } // an action's keybind
 
-    // From the last refresh. Actions go to `target`: the machine I picked in the menu, else the one
-    // the TUI shows, else Local. Switching machines in the TUI drops the menu's pick.
+    // From the last refresh, for the backend picked at the top of the menu. Actions go to `target`: the machine
+    // I picked in the menu, else the one the TUI shows, else Local. Switching machines in the TUI drops the menu's pick.
     var machines = [Machine.local]
     var tuiSelected: Machine?
     var picked: Machine?
     var refreshing = false
     var target: Machine {
         let pick = setting(Setting.machines) == "one" ? picked : nil
-        return [pick, tuiSelected].compactMap { $0 }.first(where: machines.contains) ?? .local
+        return [pick, tuiSelected].compactMap { $0 }.first(where: machines.contains) ?? machines[0]
     }
 
     // The status badge: a 7pt dot in an 11pt notch cut from the icon's bottom-right corner.
@@ -388,21 +571,24 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refresh() }
     }
 
-    // Always running (a login item); the icon only shows while a herdr client is open.
-    // A red dot means an agent is blocked on me, teal means one finished and I haven't looked yet.
+    // Always running (a login item); the icon only shows while a herdr client or the Rex app is open.
+    // A red dot means an agent is blocked on me, teal means one finished and I haven't looked yet,
+    // counting the backend picked at the top of the menu.
     // Polls off the main thread, since remote machines answer over SSH.
     func refresh() {
         guard !refreshing else { return }
         refreshing = true
+        let b = backend
         DispatchQueue.global().async {
-            let visible = herdrClientPID() != nil
-            let (all, selected) = visible ? loadMachines() : ([Machine.local], nil)
-            let lists = visible ? fetch(all, ["agent", "list"]) : []
+            let visible = herdrClientPID() != nil || rexAppRunning()
+            let (all, selected) = visible ? loadMachines(b) : ([b.local], nil)
+            let lists = visible ? fetch(all) { $0.agents() } : []
             DispatchQueue.main.async {
                 self.refreshing = false
+                guard b == backend else { return self.refresh() } // switched while this one ran
                 self.machines = all
                 if selected != self.tuiSelected { self.tuiSelected = selected; self.picked = nil }
-                self.show(visible: visible, statuses: lists.flatMap { $0?.agents ?? [] }.compactMap(\.agentStatus))
+                self.show(visible: visible, statuses: lists.flatMap { $0 ?? [] }.compactMap(\.agentStatus))
             }
         }
     }
@@ -421,29 +607,43 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dot.frame = NSRect(x: x0 + iconSize - dotSize, y: button.isFlipped ? y0 + iconSize - dotSize : y0,
                            width: dotSize, height: dotSize)
         let counts = [(blocked, "blocked"), (done, "done")].filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }
-        button.toolTip = counts.isEmpty ? "herdr" : "Agents: " + counts.joined(separator: ", ")
+        button.toolTip = counts.isEmpty ? backend.title : "Agents: " + counts.joined(separator: ", ")
     }
 
     // The whole menu is rebuilt from the live snapshot each time it opens:
-    // Agents / Workspace / Tab / Pane (each named after the focused one) / Launch at login, Quit
+    // herdr or Rex / Agents / Workspace / Tab / Pane (each named after the focused one) / Launch at login, Quit
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+        let b = backend, rex = b == .rex
+        for c in Setting.backendChoices {
+            let mi = menuItem(c.title, icon: c.value == "rex" ? "terminal" : "rectangle.split.3x1", action: #selector(choose(_:)))
+            mi.representedObject = [Setting.backend, c.value]
+            mi.state = c.value == b.rawValue ? .on : .off
+            menu.addItem(mi)
+        }
+        menu.addItem(.separator())
         // Reread my config so edits show up straight away
-        let config = NSHomeDirectory() + "/.config/herdr/config.toml"
-        keybinds = Keybinds(toml: (try? String(contentsOfFile: config, encoding: .utf8)) ?? "")
+        if rex {
+            let keymap = RexKeymap(json: run(["keymap", "--json"], exe: rexCLI).out)
+            keys = keymap.keys(for:)
+        } else {
+            let config = NSHomeDirectory() + "/.config/herdr/config.toml"
+            keys = Keybinds(toml: (try? String(contentsOfFile: config, encoding: .utf8)) ?? "").keys(for:)
+        }
         // Every machine at once; a remote one that doesn't answer in time shows as unreachable.
         // "One at a time" shows just the target machine, with a picker to switch.
-        let all = machines, multi = all.count > 1, target = target
+        // Just after switching backend, before a refresh has listed its machines: Local only
+        let all = machines[0].backend == b ? machines : [b.local], multi = all.count > 1, target = all.contains(target) ? target : all[0]
         let together = !multi || setting(Setting.machines) == "all"
         let shown = together ? all : [target]
-        let snaps = fetch(shown, ["api", "snapshot"]).map { $0?.snapshot }
+        let snaps = fetch(shown) { $0.snapshot() }
         let list = setting(Setting.show)
         func names(_ snap: Snapshot?) -> [String: String] {
             Dictionary(((snap?.workspaces ?? []) + (snap?.tabs ?? [])).map { ($0.tabId ?? $0.workspaceId, $0.label) }) { first, _ in first }
         }
 
         if !together {
-            menu.addItem(header("Machine", target.name))
+            menu.addItem(header(b.words("Machine"), target.name))
             for (i, m) in all.enumerated() {
                 let mi = menuItem(m.name, icon: m.id == nil ? "laptopcomputer" : "server.rack", action: #selector(pick(_:)))
                 mi.representedObject = i
@@ -462,59 +662,62 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 menu.addItem(NSMenuItem(title: snap == nil && m.id != nil ? "Not reachable" : "No agents", action: nil, keyEquivalent: ""))
             }
             for a in agents {
-                menu.addItem(listRow(n[a.workspaceId] ?? displayName(a), detail: n[a.tabId] ?? displayName(a),
+                // Rex's windows are rarely named ("Window 1a2b3c4d"), so its agents show their terminal title
+                menu.addItem(listRow(n[a.workspaceId] ?? displayName(a), detail: (rex ? nil : n[a.tabId]) ?? displayName(a),
                                      status: a.agentStatus, focused: a.focused,
-                                     command: Command(machine: m, args: ["agent", "focus", a.paneId])))
+                                     command: Command(machine: m, args: rex ? rexShow(session: a.workspaceId, window: a.tabId, block: a.paneId)
+                                                                            : ["agent", "focus", a.paneId])))
             }
         }
         if list != "workspaces" { menu.addItem(.separator()) }
 
         // Then biggest to smallest, like herdr: workspace, tab, pane. Each header names the focused one,
         // which is where its actions land: the target machine (with every machine shown, the one the TUI shows).
+        // Rex's actions land wherever the Rex app has focus, which the server doesn't report, so its headers name nothing.
         let snap = shown.firstIndex(of: target).flatMap { snaps[$0] }
         let n = names(snap)
         let pane = snap?.panes.first { $0.focused == true }
-        let on = shown.count > 1 ? " (\(target.name))" : ""
+        let on = shown.count > 1 && !rex ? " (\(target.name))" : ""
         // Each section's actions can be turned off; the workspace list (Show) stays under its header regardless
         let workspaceRows = list != "agents", sectionOn = { setting(Setting.section($0)) == "on" }
         if workspaceRows || sectionOn("workspace") {
-            menu.addItem(header("Workspace", pane.flatMap { n[$0.workspaceId] }.map { $0 + on }))
+            menu.addItem(header(b.words("Workspace"), pane.flatMap { n[$0.workspaceId] }.map { $0 + on }))
             // Workspace rows for every machine shown, the machine in grey when there are several
             for (m, snap) in zip(shown, snaps) where workspaceRows {
                 for w in snap?.workspaces ?? [] {
                     menu.addItem(listRow(w.label, detail: shown.count > 1 ? m.name : "", status: w.agentStatus, focused: w.focused,
-                                         command: Command(machine: m, args: ["workspace", "focus", w.workspaceId])))
+                                         command: Command(machine: m, args: rex ? rexShow(session: w.workspaceId) : ["workspace", "focus", w.workspaceId])))
                 }
             }
-            if sectionOn("workspace") { add(workspaceActions, to: menu, on: target) }
+            if sectionOn("workspace") { add(rex ? rexSessionActions : workspaceActions, to: menu, on: target) }
             menu.addItem(.separator())
         }
 
         if sectionOn("tab") {
             menu.addItem(header("Tab", pane.flatMap { n[$0.tabId] }.map { $0 + on }))
-            add(tabActions, to: menu, on: target)
+            add(rex ? rexTabActions : tabActions, to: menu, on: target)
             menu.addItem(.separator())
         }
 
         if sectionOn("pane") {
             menu.addItem(header("Pane", pane.map { displayName($0) + on }))
-            add(paneActions, to: menu, on: target)
-            for sub in paneSubmenus {
+            add(rex ? rexPaneActions : paneActions, to: menu, on: target)
+            for sub in rex ? rexPaneSubmenus : paneSubmenus {
                 let mi = menuItem(sub.title, icon: sub.icon, action: nil)
                 mi.submenu = NSMenu()
                 sub.actions.forEach { mi.submenu?.addItem(item($0, on: target)) }
                 menu.addItem(mi)
             }
-            menu.addItem(item(closePane, on: target))
+            menu.addItem(item(rex ? rexClosePane : closePane, on: target))
             menu.addItem(.separator())
         }
 
-        // Settings, kept in UserDefaults; Machines only matters with saved SSH machines
-        menu.addItem(settingMenu("Show", icon: "list.bullet", key: Setting.show, choices: Setting.showChoices))
+        // Settings, kept in UserDefaults; Machines only matters with saved SSH machines or Rex hosts
+        menu.addItem(settingMenu("Show", icon: "list.bullet", key: Setting.show, choices: Setting.showChoices.map { ($0.value, b.words($0.title)) }))
         let actions = menuItem("Actions", icon: "slider.horizontal.3", action: nil)
         actions.submenu = NSMenu()
         for (kind, title) in Setting.sections {
-            let row = NSMenuItem(title: title, action: #selector(toggleSection(_:)), keyEquivalent: "")
+            let row = NSMenuItem(title: b.words(title), action: #selector(toggleSection(_:)), keyEquivalent: "")
             row.target = self
             row.representedObject = kind
             row.state = setting(Setting.section(kind)) == "on" ? .on : .off
@@ -522,7 +725,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         menu.addItem(actions)
         if multi {
-            menu.addItem(settingMenu("Machines", icon: "server.rack", key: Setting.machines, choices: Setting.machineChoices))
+            menu.addItem(settingMenu(b.words("Machines"), icon: "server.rack", key: Setting.machines, choices: Setting.machineChoices))
         }
         let login = menuItem("Launch at login", icon: "sunrise", action: #selector(toggleLaunchAtLogin))
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -547,7 +750,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // ponytail: keybinds come from this Mac's config.toml, even for a remote machine's actions
     func item(_ a: Action, on m: Machine) -> NSMenuItem {
-        menuItem(a.title, icon: a.icon, keys: keybinds.keys(for: a.binding), command: Command(machine: m, args: a.args))
+        menuItem(a.title, icon: a.icon, keys: keys(a.binding), command: Command(machine: m, args: a.args))
     }
 
     // Each action's row. "New tab…" and "New workspace…" ask for a name first; holding ⌥ swaps each for a
@@ -608,6 +811,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func choose(_ sender: NSMenuItem) {
         guard let kv = sender.representedObject as? [String] else { return }
         UserDefaults.standard.set(kv[1], forKey: kv[0])
+        if kv[0] == Setting.backend { picked = nil; refresh() }
     }
 
     @objc func pick(_ sender: NSMenuItem) {
@@ -660,8 +864,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 args[i] = field.stringValue
             }
         }
-        let r = run(m.cmd(args), timeout: m.id == nil ? nil : 10)
-        if r.ok { bringTerminalForward() } else { alert(r.err.isEmpty ? "herdr \(m.cmd(args).joined(separator: " ")) failed" : r.err) }
+        let r = run(m.cmd(args), exe: m.backend.exe, timeout: m.id == nil ? nil : 10)
+        if r.ok { bringTerminalForward(m.backend) } else { alert(r.err.isEmpty ? "\(m.backend.title) \(m.cmd(args).joined(separator: " ")) failed" : r.err) }
     }
 
     // Not NSApplication.terminate directly: macOS 26 gives that selector its own menu icon,
@@ -691,7 +895,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func alert(_ text: String) {
         let a = NSAlert()
-        a.messageText = "herdr"
+        a.messageText = backend.title
         a.informativeText = text
         NSApp.activate()
         a.runModal()
@@ -711,6 +915,15 @@ if CommandLine.arguments.contains("--self-test") {
     precondition(isHerdrClient("herdr --remote nuc"))
     precondition(Machine(id: "abc", name: "NUC").cmd(["agent", "list"]) == ["--machine", "abc", "agent", "list"])
     precondition(Machine.local.cmd(["agent", "list"]) == ["agent", "list"])
+    precondition(Machine(id: "studio", name: "studio", backend: .rex).cmd(["ls"]) == ["-S", "studio", "ls"])
+    precondition(Backend.rex.words("Workspaces only") == "Sessions only" && Backend.herdr.words("Machines") == "Machines")
+    precondition(rexShow(session: "s1", block: "b1").suffix(2) == ["session=s1", "block=b1"])
+    let hosts = try! decoder.decode(RexHosts.self, from: Data(#"{"home":{"label":""},"hosts":[{"host":{"endpoints":["https://x"],"id":"host:1","label":"MacArchy"},"from":"home","held":false}],"warnings":[]}"#.utf8))
+    precondition(hosts.hosts[0].host.label == "MacArchy")
+    let rk = RexKeymap(json: Data(#"{"bindings":[{"keys":["Cmd+Shift+D"],"action":"pane.split.down"},{"keys":["cmd+d"],"action":"pane.split.down"},{"keys":["ctrl+b>option+left"],"action":"pane.resize","args":{"direction":"left","amount":15}},{"keys":["cmd+g"],"action":"lazygit_float"}],"diagnostics":[]}"#.utf8))
+    precondition(rk.keys(for: "pane.split.down") == ("⇧⌘", "D")) // first listed wins, aliases and case don't matter
+    precondition(rk.keys(for: "pane.resize.left") == ("⌃B", "⌥←")) // a sequence, direction folded in
+    precondition(rk.keys(for: "pane.zoom") == ("", ""))
     let saved = try! decoder.decode([SavedMachine].self, from: Data(#"[{"id":"abc","label":"NUC","target":"nuc","session":"default","enabled":true,"selected":false}]"#.utf8))
     precondition(saved[0].label == "NUC" && saved[0].enabled && saved[0].selected == false)
     let k = Keybinds(toml: """

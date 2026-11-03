@@ -50,11 +50,24 @@ Everything goes through `herdr --machine <id> ...`, so it needs herdr 0.9.5 or l
 
 Clicking a remote agent moves focus on that machine's server. You only see it if your TUI is showing that machine, because the CLI can't switch the TUI's machine for you.
 
+### Rex
+
+The top of the menu switches between **herdr** and **[Rex](https://www.superlogical.com/rex)**. In Rex mode the menu works the same way, in Rex's words:
+
+- **Agents** are terminals whose program reports a status to Rex (OSC 7501, as Claude Code does), with the same dots and badge. Click one to show its session in the Rex app and focus it.
+- **Workspaces are sessions**, tabs are tabs (Rex's windows), and panes are panes (Rex's blocks). Swap is **Move**, Rex's name for it.
+- **Machines are hosts**: everything in `rex hosts` is listed, through `rex -S <host> ...`.
+- The actions run the Rex app's own actions (`rex do pane.split.right` and so on), so they act on whatever has focus in Rex. Renaming uses the app's inline rename, and new tabs and sessions don't ask for a name. Because the Rex server doesn't say which session the app is showing, the section headers don't name the focused one.
+- Keybinds shown are the ones in your `init.lua` (`rex keymap`). The app's built-in shortcuts aren't visible to the server, so they don't show.
+
+The icon shows while a herdr client or the Rex app is open. The badge counts the agents of whichever one is picked. It needs the `rex` CLI that comes with Rex.
+
 ### Settings
 
+- **herdr / Rex** at the top: which one the menu drives (`defaults write dev.pierre-charles.herdr-menu backend rex`).
 - **Show**: agents and workspaces (default), agents only, or workspaces only.
 - **Actions**: turn the Workspace, Tab and Pane action sections on or off (all on by default). The workspace list from **Show** stays either way.
-- **Machines**: all together or one at a time (only with saved SSH machines).
+- **Machines** (**Hosts** for Rex): all together or one at a time (only with saved SSH machines or Rex hosts).
 
 These are stored in the app's defaults, e.g. `defaults write dev.pierre-charles.herdr-menu show agents` or `defaults write dev.pierre-charles.herdr-menu actions.pane off`.
 
