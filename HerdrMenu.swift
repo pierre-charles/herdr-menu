@@ -469,7 +469,13 @@ func label(_ title: String, icon: String, keys: (String, String) = ("", ""), tin
     }
     let s = NSMutableAttributedString(attachment: att)
     s.addAttributes(attrs, range: NSRange(location: 0, length: s.length))
-    s.append(NSAttributedString(string: "\t" + title, attributes: attrs))
+    // Cut the title by width, not characters: text past a tab stop wraps the rest onto a second line
+    let room = 200 - 26 - (keys.0 as NSString).size(withAttributes: attrs).width - 12
+    var fitted = title
+    while fitted.count > 1, (fitted as NSString).size(withAttributes: attrs).width > room {
+        fitted = title.prefix(fitted.count - 2) + "…"
+    }
+    s.append(NSAttributedString(string: "\t" + fitted, attributes: attrs))
     s.append(NSAttributedString(string: "\t\(keys.0)\t\(keys.1)", attributes: attrs.merging([.foregroundColor: NSColor.secondaryLabelColor]) { $1 }))
     return s
 }
@@ -549,7 +555,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_: Notification) {
         icon = Bundle.main.image(forResource: "sheep")
             ?? NSImage(systemSymbolName: "rectangle.split.3x1", accessibilityDescription: "herdr")!
-        icon.size = NSSize(width: iconSize, height: iconSize)
+        // sheep.png is trimmed to the sheep, so keep its shape and the button centres what you see
+        icon.size = NSSize(width: iconSize, height: iconSize * icon.size.height / icon.size.width)
         icon.isTemplate = true
         notched = NSImage(size: icon.size, flipped: false) { [icon, iconSize, dotSize, notchSize] r in
             icon.draw(in: r)
@@ -603,8 +610,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // A CGColor is fixed when read, so resolve it for the menu bar's look (it can be dark in light mode)
         button.effectiveAppearance.performAsCurrentDrawingAppearance { self.dot.layer?.backgroundColor = color?.cgColor }
         // Same spot as the notch: the icon's bottom-right corner, wherever the button centres it
-        let x0 = (button.bounds.width - iconSize) / 2, y0 = (button.bounds.height - iconSize) / 2
-        dot.frame = NSRect(x: x0 + iconSize - dotSize, y: button.isFlipped ? y0 + iconSize - dotSize : y0,
+        let w = icon.size.width, h = icon.size.height
+        let x0 = (button.bounds.width - w) / 2, y0 = (button.bounds.height - h) / 2
+        dot.frame = NSRect(x: x0 + w - dotSize, y: button.isFlipped ? y0 + h - dotSize : y0,
                            width: dotSize, height: dotSize)
         let counts = [(blocked, "blocked"), (done, "done")].filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }
         button.toolTip = counts.isEmpty ? backend.title : "Agents: " + counts.joined(separator: ", ")
@@ -770,8 +778,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // An agent or workspace row: herdr's status dot, name, grey detail, checkmark when focused
     func listRow(_ title: String, detail: String, status: String?, focused: Bool?, command: Command) -> NSMenuItem {
         let (symbol, color) = style(status)
-        // short() keeps the detail column straight
-        let mi = menuItem(short(title, 26), icon: symbol, keys: ("", short(detail, 30)), tint: color, command: command)
+        let mi = menuItem(title, icon: symbol, keys: ("", short(detail, 30)), tint: color, command: command)
         mi.state = focused == true ? .on : .off
         return mi
     }
