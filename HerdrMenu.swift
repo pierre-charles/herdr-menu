@@ -892,11 +892,18 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             action.keyEquivalent = ""
             cancel.keyEquivalent = "\r"
         }
+        NSApp.activate()
         if let field {
             a.accessoryView = field
-            a.window.initialFirstResponder = field
+            // initialFirstResponder only counts if the window is key when it first shows, and activation
+            // is only a request that can land late. So once the modal loop runs, activate again and focus
+            // the field directly.
+            DispatchQueue.main.async {
+                NSApp.activate()
+                a.window.makeKeyAndOrderFront(nil)
+                a.window.makeFirstResponder(field)
+            }
         }
-        NSApp.activate()
         return a.runModal() == .alertFirstButtonReturn
     }
 
