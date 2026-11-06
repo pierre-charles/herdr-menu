@@ -13,13 +13,14 @@ let rexBundle = "com.superlogical.rex"
 
 // MARK: - Backends
 
-// The multiplexer the menu drives, picked at the top of the menu. Rex calls herdr's workspaces sessions,
-// its tabs windows (the app shows them as tabs), its panes blocks and its machines hosts.
-enum Backend: String {
+// The multiplexer the menu drives: whichever is open, or the one picked at the top of the menu when both are.
+// Rex calls herdr's workspaces sessions, its tabs windows (the app shows them as tabs), its panes blocks and its machines hosts.
+enum Backend: String, CaseIterable {
     case herdr, rex
     var title: String { self == .herdr ? "herdr" : "Rex" }
     var exe: String { self == .herdr ? herdrCLI : rexCLI }
     var local: Machine { Machine(id: nil, name: "Local", backend: self) }
+    var isRunning: Bool { self == .herdr ? herdrClientPID() != nil : rexAppRunning() }
 
     // A menu title in this backend's words
     func words(_ s: String) -> String {
@@ -448,6 +449,35 @@ func rexAppRunning() -> Bool { !NSRunningApplication.runningApplications(withBun
 
 // MARK: - Drawing
 
+// Rex's mascot for the menu bar, made one colour like the sheep from the "Rexie" image in the installed Rex app,
+// so none of Rex's artwork ships in this repo. Keeps its shape minus the dark eye and mouth, trimmed to the shape.
+// ponytail: tied to the image's name and colours in Rex's assets; nil (the caller falls back) if Rex changes them.
+func rexMascot() -> NSImage? {
+    let n = 72
+    guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: rexBundle),
+          let source = Bundle(url: url)?.image(forResource: "Rexie"),
+          let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: n, pixelsHigh: n, bitsPerSample: 8, samplesPerPixel: 4,
+                                     hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: n * 4, bitsPerPixel: 32),
+          let p = rep.bitmapData else { return nil }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    source.draw(in: NSRect(x: 0, y: 0, width: n, height: n))
+    NSGraphicsContext.restoreGraphicsState()
+    var box = CGRect.null
+    for y in 0..<n {
+        for x in 0..<n {
+            let i = (y * n + x) * 4, a = Int(p[i + 3])
+            // Premultiplied, so green against alpha: the body has plenty, the eye and mouth hardly any.
+            // Low alpha is the soft glow behind the head.
+            let keep = a > 90 && Int(p[i + 1]) * 255 > 60 * a
+            (p[i], p[i + 1], p[i + 2], p[i + 3]) = (0, 0, 0, keep ? UInt8(a) : 0)
+            if keep { box = box.union(CGRect(x: x, y: y, width: 1, height: 1)) }
+        }
+    }
+    guard let cropped = rep.cgImage?.cropping(to: box) else { return nil }
+    return NSImage(cgImage: cropped, size: .zero)
+}
+
 // Icon, title, then keybind right-aligned in grey, like Rectangle.
 // The icon lives inside the title text: macOS hides NSMenuItem.image for this app, bundled or not.
 func label(_ title: String, icon: String, keys: (String, String) = ("", ""), tint: NSColor? = nil) -> NSAttributedString {
@@ -527,22 +557,26 @@ func setting(_ key: String) -> String {
     UserDefaults.standard.string(forKey: key) ?? Setting.defaults[key] ?? ""
 }
 
-var backend: Backend { Backend(rawValue: setting(Setting.backend)) ?? .herdr }
+// The one picked at the top of the menu, which only shows while both are open
+var pickedBackend: Backend { Backend(rawValue: setting(Setting.backend)) ?? .herdr }
 
 // MARK: - App
 
 final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    var icon = NSImage(), notched = NSImage()
+    var icons: [Backend: (plain: NSImage, notched: NSImage)] = [:]
     let dot = NSView()
     var keys: (String) -> (String, String) = { _ in ("", "") } // an action's keybind
 
-    // From the last refresh, for the backend picked at the top of the menu. Actions go to `target`: the machine
+    // From the last refresh, for the backend the menu drives. Actions go to `target`: the machine
     // I picked in the menu, else the one the TUI shows, else Local. Switching machines in the TUI drops the menu's pick.
     var machines = [Machine.local]
     var tuiSelected: Machine?
     var picked: Machine?
     var refreshing = false
+    // The menu drives whichever of herdr and Rex is open, or the picked one when both are
+    var running: [Backend] = []
+    var backend: Backend { running.count == 1 ? running[0] : pickedBackend }
     var target: Machine {
         let pick = setting(Setting.machines) == "one" ? picked : nil
         return [pick, tuiSelected].compactMap { $0 }.first(where: machines.contains) ?? machines[0]
@@ -553,20 +587,12 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let iconSize: CGFloat = 18, dotSize: CGFloat = 7, notchSize: CGFloat = 11
 
     func applicationDidFinishLaunching(_: Notification) {
-        icon = Bundle.main.image(forResource: "sheep")
-            ?? NSImage(systemSymbolName: "rectangle.split.3x1", accessibilityDescription: "herdr")!
-        // sheep.png is trimmed to the sheep, so keep its shape and the button centres what you see
-        icon.size = NSSize(width: iconSize, height: iconSize * icon.size.height / icon.size.width)
-        icon.isTemplate = true
-        notched = NSImage(size: icon.size, flipped: false) { [icon, iconSize, dotSize, notchSize] r in
-            icon.draw(in: r)
-            let c = iconSize - dotSize / 2
-            NSGraphicsContext.current?.compositingOperation = .destinationOut
-            NSBezierPath(ovalIn: NSRect(x: c - notchSize / 2, y: dotSize / 2 - notchSize / 2, width: notchSize, height: notchSize)).fill()
-            return true
-        }
-        notched.isTemplate = true
-        status.button?.image = icon
+        icons = [
+            .herdr: menuBarIcons(Bundle.main.image(forResource: "sheep")
+                ?? NSImage(systemSymbolName: "rectangle.split.3x1", accessibilityDescription: "herdr")!),
+            .rex: menuBarIcons(rexMascot() ?? NSImage(systemSymbolName: "terminal", accessibilityDescription: "Rex")!),
+        ]
+        status.button?.image = icons[backend]?.plain
         dot.wantsLayer = true
         dot.layer?.cornerRadius = dotSize / 2
         status.button?.addSubview(dot)
@@ -578,21 +604,40 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refresh() }
     }
 
-    // Always running (a login item); the icon only shows while a herdr client or the Rex app is open.
+    // The icon as a template (macOS tints it for light/dark), plain and with the badge's notch.
+    // The images are trimmed to their shape, so keep it and the button centres what you see.
+    func menuBarIcons(_ icon: NSImage) -> (plain: NSImage, notched: NSImage) {
+        icon.size = NSSize(width: iconSize, height: iconSize * icon.size.height / icon.size.width)
+        icon.isTemplate = true
+        let notched = NSImage(size: icon.size, flipped: false) { [iconSize, dotSize, notchSize] r in
+            icon.draw(in: r)
+            let c = iconSize - dotSize / 2
+            NSGraphicsContext.current?.compositingOperation = .destinationOut
+            NSBezierPath(ovalIn: NSRect(x: c - notchSize / 2, y: dotSize / 2 - notchSize / 2, width: notchSize, height: notchSize)).fill()
+            return true
+        }
+        notched.isTemplate = true
+        return (icon, notched)
+    }
+
+    // Always running (a login item); the icon only shows while a herdr client or the Rex app is open,
+    // as the sheep or Rex's mascot for the one the menu drives.
     // A red dot means an agent is blocked on me, teal means one finished and I haven't looked yet,
-    // counting the backend picked at the top of the menu.
+    // counting the backend the menu drives.
     // Polls off the main thread, since remote machines answer over SSH.
     func refresh() {
         guard !refreshing else { return }
         refreshing = true
-        let b = backend
+        let picked = pickedBackend
         DispatchQueue.global().async {
-            let visible = herdrClientPID() != nil || rexAppRunning()
+            let running = Backend.allCases.filter(\.isRunning), visible = !running.isEmpty
+            let b = running.count == 1 ? running[0] : picked
             let (all, selected) = visible ? loadMachines(b) : ([b.local], nil)
             let lists = visible ? fetch(all) { $0.agents() } : []
             DispatchQueue.main.async {
                 self.refreshing = false
-                guard b == backend else { return self.refresh() } // switched while this one ran
+                guard picked == pickedBackend else { return self.refresh() } // switched while this one ran
+                self.running = running
                 self.machines = all
                 if selected != self.tuiSelected { self.tuiSelected = selected; self.picked = nil }
                 self.show(visible: visible, statuses: lists.flatMap { $0 ?? [] }.compactMap(\.agentStatus))
@@ -605,6 +650,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard visible, let button = status.button else { return }
         let blocked = statuses.filter { $0 == "blocked" }.count, done = statuses.filter { $0 == "done" }.count
         let color = blocked > 0 ? style("blocked").color : done > 0 ? style("done").color : nil
+        guard let (icon, notched) = icons[backend] else { return }
         button.image = color == nil ? icon : notched
         dot.isHidden = color == nil
         // A CGColor is fixed when read, so resolve it for the menu bar's look (it can be dark in light mode)
@@ -619,17 +665,17 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // The whole menu is rebuilt from the live snapshot each time it opens:
-    // herdr or Rex / Agents / Switch workspace › / Workspace › Tab › Pane › (each named after the focused one) / settings, Quit
+    // herdr or Rex (while both are open) / Agents / Switch workspace › / Workspace › Tab › Pane › (each named after the focused one) / settings, Quit
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let b = backend, rex = b == .rex
-        for c in Setting.backendChoices {
+        for c in Setting.backendChoices where running.count > 1 {
             let mi = menuItem(c.title, icon: c.value == "rex" ? "terminal" : "rectangle.split.3x1", action: #selector(choose(_:)))
             mi.representedObject = [Setting.backend, c.value]
             mi.state = c.value == b.rawValue ? .on : .off
             menu.addItem(mi)
         }
-        menu.addItem(.separator())
+        if running.count > 1 { menu.addItem(.separator()) }
         // Reread my config so edits show up straight away
         if rex {
             let keymap = RexKeymap(json: run(["keymap", "--json"], exe: rexCLI).out)

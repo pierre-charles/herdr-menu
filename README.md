@@ -52,7 +52,7 @@ Clicking a remote agent moves focus on that machine's server. You only see it if
 
 ### Rex
 
-The top of the menu switches between **herdr** and **[Rex](https://www.superlogical.com/rex)**. In Rex mode the menu works the same way, in Rex's words:
+The menu drives whichever of **herdr** and **[Rex](https://www.superlogical.com/rex)** is open. When both are, a switch at the top of the menu picks one. In Rex mode the menu bar shows Rex's mascot instead of the sheep, and the menu works the same way, in Rex's words:
 
 - **Agents** are terminals whose program reports a status to Rex (OSC 7501, as Claude Code does), with the same dots and badge. Click one to show its session in the Rex app and focus it.
 - **Workspaces are sessions**, tabs are tabs (Rex's windows), and panes are panes (Rex's blocks). Swap is **Move**, Rex's name for it.
@@ -60,11 +60,11 @@ The top of the menu switches between **herdr** and **[Rex](https://www.superlogi
 - The actions run the Rex app's own actions (`rex do pane.split.right` and so on), so they act on whatever has focus in Rex. Renaming uses the app's inline rename, and new tabs and sessions don't ask for a name. Because the Rex server doesn't say which session the app is showing, the section rows don't name the focused one.
 - Keybinds shown are the ones in your `init.lua` (`rex keymap`). The app's built-in shortcuts aren't visible to the server, so they don't show.
 
-The icon shows while a herdr client or the Rex app is open. The badge counts the agents of whichever one is picked. It needs the `rex` CLI that comes with Rex.
+The icon shows while a herdr client or the Rex app is open. The badge counts the agents of the one the menu drives. It needs the `rex` CLI that comes with Rex.
 
 ### Settings
 
-- **herdr / Rex** at the top: which one the menu drives (`defaults write dev.pierre-charles.herdr-menu backend rex`).
+- **herdr / Rex** at the top, while both are open: which one the menu drives (`defaults write dev.pierre-charles.herdr-menu backend rex`).
 - **Show**: agents and workspaces (default), agents only, or workspaces only (listed in the menu itself rather than under **Switch workspace**).
 - **Actions**: turn the Workspace, Tab and Pane submenus on or off (all on by default). **Switch workspace** stays either way.
 - **Machines** (**Hosts** for Rex): all together or one at a time (only with saved SSH machines or Rex hosts).
@@ -106,7 +106,7 @@ Untick **Launch at login**, choose **Quit**, then delete `~/Applications/HerdrMe
 - The keybinds shown are your own: the menu reads `~/.config/herdr/config.toml` each time it opens and resolves them the way herdr does (your `prefix` and `[keys]` entries win, and a default that shares a key with one of your bindings, including `[[keys.command]]` keys, is dropped). Bindings must be on one line, e.g. `new_tab = "prefix+t"` or `new_tab = ["prefix+t", "ctrl+alt+t"]`; the first one is shown.
 - The screenshots were made with a demo mode (made-up workspaces and agents) that has since been removed. To retake them, restore it from commit `bb7e941`.
 - Status colours are herdr's Catppuccin palette, its default theme.
-- The app icon is herdr's logo (`logo.png`), and the menu bar icon is the same logo converted to a template image (`sheep.png`).
+- The app icon is herdr's logo (`logo.png`), and the menu bar icon is the same logo converted to a template image (`sheep.png`). Rex's mascot isn't in the repo: the app makes it from the image in your installed Rex app.
 
 ## Licence
 
