@@ -619,7 +619,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // The whole menu is rebuilt from the live snapshot each time it opens:
-    // herdr or Rex / Agents / Workspace / Tab / Pane (each named after the focused one) / Launch at login, Quit
+    // herdr or Rex / Agents / Switch workspace › / Workspace › Tab › Pane › (each named after the focused one) / settings, Quit
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let b = backend, rex = b == .rex
@@ -651,7 +651,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         if !together {
-            menu.addItem(header(b.words("Machine"), target.name))
+            menu.addItem(.sectionHeader(title: heading(b.words("Machine"), target.name)))
             for (i, m) in all.enumerated() {
                 let mi = menuItem(m.name, icon: m.id == nil ? "laptopcomputer" : "server.rack", action: #selector(pick(_:)))
                 mi.representedObject = i
@@ -679,46 +679,42 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if list != "workspaces" { menu.addItem(.separator()) }
 
-        // Then biggest to smallest, like herdr: workspace, tab, pane. Each header names the focused one,
+        // Then biggest to smallest, like herdr: workspace, tab, pane, each a submenu named after the focused one,
         // which is where its actions land: the target machine (with every machine shown, the one the TUI shows).
-        // Rex's actions land wherever the Rex app has focus, which the server doesn't report, so its headers name nothing.
+        // Rex's actions land wherever the Rex app has focus, which the server doesn't report, so its rows name nothing.
         let snap = shown.firstIndex(of: target).flatMap { snaps[$0] }
         let n = names(snap)
         let pane = snap?.panes.first { $0.focused == true }
         let on = shown.count > 1 && !rex ? " (\(target.name))" : ""
-        // Each section's actions can be turned off; the workspace list (Show) stays under its header regardless
-        let workspaceRows = list != "agents", sectionOn = { setting(Setting.section($0)) == "on" }
-        if workspaceRows || sectionOn("workspace") {
-            menu.addItem(header(b.words("Workspace"), pane.flatMap { n[$0.workspaceId] }.map { $0 + on }))
-            // Workspace rows for every machine shown, the machine in grey when there are several
-            for (m, snap) in zip(shown, snaps) where workspaceRows {
-                for w in snap?.workspaces ?? [] {
-                    menu.addItem(listRow(w.label, detail: shown.count > 1 ? m.name : "", status: w.agentStatus, focused: w.focused,
-                                         command: Command(machine: m, args: rex ? rexShow(session: w.workspaceId) : ["workspace", "focus", w.workspaceId])))
-                }
+        // Workspace rows for every machine shown, the machine in grey when there are several. Inline when Show is
+        // workspaces only, else in a submenu (the agents above already name most of them) with the most urgent dot.
+        let workspaces = list == "agents" ? [] : zip(shown, snaps).flatMap { m, snap in
+            (snap?.workspaces ?? []).map { w in
+                listRow(w.label, detail: shown.count > 1 ? m.name : "", status: w.agentStatus, focused: w.focused,
+                        command: Command(machine: m, args: rex ? rexShow(session: w.workspaceId) : ["workspace", "focus", w.workspaceId]))
             }
-            if sectionOn("workspace") { add(rex ? rexSessionActions : workspaceActions, to: menu, on: target) }
+        }
+        if list == "workspaces" {
+            menu.addItem(.sectionHeader(title: b.words("Workspaces")))
+            workspaces.forEach { menu.addItem($0) }
             menu.addItem(.separator())
+        } else if !workspaces.isEmpty {
+            let (symbol, color) = style(snaps.flatMap { $0?.workspaces ?? [] }.map(\.agentStatus).min { rank($0) < rank($1) } ?? nil)
+            menu.addItem(submenu(b.words("Switch workspace"), icon: symbol, tint: color, workspaces))
         }
 
-        if sectionOn("tab") {
-            menu.addItem(header("Tab", pane.flatMap { n[$0.tabId] }.map { $0 + on }))
-            add(rex ? rexTabActions : tabActions, to: menu, on: target)
-            menu.addItem(.separator())
+        let paneRows = rows(rex ? rexPaneActions : paneActions, on: target)
+            + (rex ? rexPaneSubmenus : paneSubmenus).map { s in submenu(s.title, icon: s.icon, s.actions.map { item($0, on: target) }) }
+            + [item(rex ? rexClosePane : closePane, on: target)]
+        let sections: [(kind: String, icon: String, name: String?, rows: [NSMenuItem])] = [
+            ("workspace", "macwindow", pane.flatMap { n[$0.workspaceId] }, rows(rex ? rexSessionActions : workspaceActions, on: target)),
+            ("tab", "rectangle.on.rectangle", pane.flatMap { n[$0.tabId] }, rows(rex ? rexTabActions : tabActions, on: target)),
+            ("pane", "square", pane.map { displayName($0) }, paneRows),
+        ]
+        for sec in sections where setting(Setting.section(sec.kind)) == "on" {
+            menu.addItem(submenu(heading(b.words(sec.kind.capitalized), sec.name.map { $0 + on }), icon: sec.icon, sec.rows))
         }
-
-        if sectionOn("pane") {
-            menu.addItem(header("Pane", pane.map { displayName($0) + on }))
-            add(rex ? rexPaneActions : paneActions, to: menu, on: target)
-            for sub in rex ? rexPaneSubmenus : paneSubmenus {
-                let mi = menuItem(sub.title, icon: sub.icon, action: nil)
-                mi.submenu = NSMenu()
-                sub.actions.forEach { mi.submenu?.addItem(item($0, on: target)) }
-                menu.addItem(mi)
-            }
-            menu.addItem(item(rex ? rexClosePane : closePane, on: target))
-            menu.addItem(.separator())
-        }
+        if menu.items.last?.isSeparatorItem == false { menu.addItem(.separator()) }
 
         // Settings, kept in UserDefaults; Machines only matters with saved SSH machines or Rex hosts
         menu.addItem(settingMenu("Show", icon: "list.bullet", key: Setting.show, choices: Setting.showChoices.map { ($0.value, b.words($0.title)) }))
@@ -741,9 +737,17 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(menuItem("Quit", icon: "power", action: #selector(quit)))
     }
 
-    // "Pane · dev": a section header naming the thing its actions act on
-    func header(_ kind: String, _ name: String?) -> NSMenuItem {
-        .sectionHeader(title: name.map { "\(kind) · " + short($0, 30) } ?? kind)
+    // "Pane · dev": a heading naming the thing its actions act on
+    func heading(_ kind: String, _ name: String?) -> String {
+        name.map { "\(kind) · " + short($0, 30) } ?? kind
+    }
+
+    // A row that opens a submenu of the given rows
+    func submenu(_ title: String, icon: String, tint: NSColor? = nil, _ rows: [NSMenuItem]) -> NSMenuItem {
+        let mi = menuItem(title, icon: icon, tint: tint, action: nil)
+        mi.submenu = NSMenu()
+        mi.submenu?.items = rows
+        return mi
     }
 
     // Every row: icon and title, optional keybind or detail column, and the CLI args to run when clicked
@@ -763,15 +767,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // Each action's row. "New tab…" and "New workspace…" ask for a name first; holding ⌥ swaps each for a
     // quick version without the "…" or the name prompt, which creates straight away like herdr's own keybind.
-    func add(_ actions: [Action], to menu: NSMenu, on m: Machine) {
-        for a in actions {
-            menu.addItem(item(a, on: m))
-            if a.title.hasSuffix("…") {
-                let alt = item((String(a.title.dropLast()), a.icon, a.binding, a.args.filter { $0 != "--label" && $0 != "{label}" }), on: m)
-                alt.isAlternate = true
-                alt.keyEquivalentModifierMask = .option
-                menu.addItem(alt)
-            }
+    func rows(_ actions: [Action], on m: Machine) -> [NSMenuItem] {
+        actions.flatMap { a -> [NSMenuItem] in
+            guard a.title.hasSuffix("…") else { return [item(a, on: m)] }
+            let alt = item((String(a.title.dropLast()), a.icon, a.binding, a.args.filter { $0 != "--label" && $0 != "{label}" }), on: m)
+            alt.isAlternate = true
+            alt.keyEquivalentModifierMask = .option
+            return [item(a, on: m), alt]
         }
     }
 

@@ -19,7 +19,7 @@
 
 - **Agents** at the top of the menu, with herdr's status dots. Click one to jump to it.
 - **A badge on the sheep** when an agent needs you (see [the sheep](#the-sheep) below).
-- **One-click actions** for panes (split, zoom, focus, resize, swap, close), tabs and workspaces (new, rename, close), plus a list of your workspaces to jump between.
+- **One-click actions** for panes (split, zoom, focus, resize, swap, close), tabs and workspaces (new, rename, close), each section in a submenu named after the focused one, plus **Switch workspace** to jump between your workspaces.
   **New tab…** and **New workspace…** ask for a name first; hold **⌥ Option** for the quick versions, which create them straight away like herdr's keybinds.
 - **herdr's keybind next to each action,** so the menu doubles as a cheat sheet.
 
@@ -57,7 +57,7 @@ The top of the menu switches between **herdr** and **[Rex](https://www.superlogi
 - **Agents** are terminals whose program reports a status to Rex (OSC 7501, as Claude Code does), with the same dots and badge. Click one to show its session in the Rex app and focus it.
 - **Workspaces are sessions**, tabs are tabs (Rex's windows), and panes are panes (Rex's blocks). Swap is **Move**, Rex's name for it.
 - **Machines are hosts**: everything in `rex hosts` is listed, through `rex -S <host> ...`.
-- The actions run the Rex app's own actions (`rex do pane.split.right` and so on), so they act on whatever has focus in Rex. Renaming uses the app's inline rename, and new tabs and sessions don't ask for a name. Because the Rex server doesn't say which session the app is showing, the section headers don't name the focused one.
+- The actions run the Rex app's own actions (`rex do pane.split.right` and so on), so they act on whatever has focus in Rex. Renaming uses the app's inline rename, and new tabs and sessions don't ask for a name. Because the Rex server doesn't say which session the app is showing, the section rows don't name the focused one.
 - Keybinds shown are the ones in your `init.lua` (`rex keymap`). The app's built-in shortcuts aren't visible to the server, so they don't show.
 
 The icon shows while a herdr client or the Rex app is open. The badge counts the agents of whichever one is picked. It needs the `rex` CLI that comes with Rex.
@@ -65,8 +65,8 @@ The icon shows while a herdr client or the Rex app is open. The badge counts the
 ### Settings
 
 - **herdr / Rex** at the top: which one the menu drives (`defaults write dev.pierre-charles.herdr-menu backend rex`).
-- **Show**: agents and workspaces (default), agents only, or workspaces only.
-- **Actions**: turn the Workspace, Tab and Pane action sections on or off (all on by default). The workspace list from **Show** stays either way.
+- **Show**: agents and workspaces (default), agents only, or workspaces only (listed in the menu itself rather than under **Switch workspace**).
+- **Actions**: turn the Workspace, Tab and Pane submenus on or off (all on by default). **Switch workspace** stays either way.
 - **Machines** (**Hosts** for Rex): all together or one at a time (only with saved SSH machines or Rex hosts).
 
 These are stored in the app's defaults, e.g. `defaults write dev.pierre-charles.herdr-menu show agents` or `defaults write dev.pierre-charles.herdr-menu actions.pane off`.
