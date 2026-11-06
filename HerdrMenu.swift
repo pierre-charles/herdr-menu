@@ -499,6 +499,11 @@ func label(_ title: String, icon: String, keys: (String, String) = ("", ""), tin
     }
     let s = NSMutableAttributedString(attachment: att)
     s.addAttributes(attrs, range: NSRange(location: 0, length: s.length))
+    // With nothing on the right, the title can take the whole row
+    guard keys != ("", "") else {
+        s.append(NSAttributedString(string: "\t" + title, attributes: attrs))
+        return s
+    }
     // Cut the title by width, not characters: text past a tab stop wraps the rest onto a second line
     let room = 200 - 26 - (keys.0 as NSString).size(withAttributes: attrs).width - 12
     var fitted = title
@@ -758,7 +763,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ("pane", "square", pane.map { displayName($0) }, paneRows),
         ]
         for sec in sections where setting(Setting.section(sec.kind)) == "on" {
-            menu.addItem(submenu(heading(b.words(sec.kind.capitalized), sec.name.map { $0 + on }), icon: sec.icon, sec.rows))
+            menu.addItem(submenu(heading(b.words(sec.kind.capitalized), sec.name, on), icon: sec.icon, sec.rows))
         }
         if menu.items.last?.isSeparatorItem == false { menu.addItem(.separator()) }
 
@@ -783,9 +788,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(menuItem("Quit", icon: "power", action: #selector(quit)))
     }
 
-    // "Pane · dev": a heading naming the thing its actions act on
-    func heading(_ kind: String, _ name: String?) -> String {
-        name.map { "\(kind) · " + short($0, 30) } ?? kind
+    // "Pane · dev": a heading naming the thing its actions act on. A long name is cut, not the machine after it.
+    func heading(_ kind: String, _ name: String?, _ machine: String = "") -> String {
+        name.map { "\(kind) · " + short($0, 30) + machine } ?? kind
     }
 
     // A row that opens a submenu of the given rows
