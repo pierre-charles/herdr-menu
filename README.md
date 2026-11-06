@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <img src="screenshots/menu.png" width="396" alt="The HerdrMenu menu: agents with status dots, then Workspace, Tab and Pane actions with their herdr keybinds">
+  <img src="screenshots/menu.png" width="400" alt="The HerdrMenu menu: agents with status dots, then Switch workspace and the Workspace, Tab and Pane submenus, each named after the focused one">
 </p>
 
 - **Agents** at the top of the menu, with herdr's status dots. Click one to jump to it.
@@ -22,6 +22,14 @@
 - **One-click actions** for panes (split, zoom, focus, resize, swap, close), tabs and workspaces (new, rename, close), each section in a submenu named after the focused one, plus **Switch workspace** to jump between your workspaces.
   **New tab…** and **New workspace…** ask for a name first; hold **⌥ Option** for the quick versions, which create them straight away like herdr's keybinds.
 - **herdr's keybind next to each action,** so the menu doubles as a cheat sheet.
+
+### Submenus
+
+| Switch workspace | Workspace |
+|:---:|:---:|
+| <img src="screenshots/switch-workspace.png" width="199" alt="Switch workspace: every workspace with its status dot, a checkmark on the current one"> | <img src="screenshots/workspace.png" width="305" alt="Workspace: New workspace…, Rename workspace and Close workspace with their keybinds"> |
+| **Tab** | **Pane** |
+| <img src="screenshots/tab.png" width="302" alt="Tab: New tab…, Rename tab and Close tab with their keybinds"> | <img src="screenshots/pane.png" width="315" alt="Pane: Split right, Split down, Toggle zoom, the Focus, Resize and Swap submenus, and Close pane"> |
 
 It calls the `herdr` CLI rather than faking keystrokes, so it acts on whichever pane you're looking at and doesn't need Accessibility permission. After a click, it brings your terminal to the front. The icon only appears while herdr is open.
 
@@ -38,7 +46,8 @@ Hover over the sheep to see how many agents are blocked or done. Viewing a finis
 ### Several machines
 
 <p align="center">
-  <img src="screenshots/machines.png" width="366" alt="The menu with agents on this Mac and on a saved machine, build-box, each under its own heading">
+  <img src="screenshots/machines.png" width="400" alt="All together: agents on this Mac and on a saved machine, build-box, each under its own heading">
+  <img src="screenshots/one-at-a-time.png" width="400" alt="One at a time: a Machine section at the top picks Local or build-box">
 </p>
 
 If you've saved SSH machines with `herdr machine add`, the sheep's badge counts agents on all of them. **Machines** chooses how the menu shows them:
@@ -52,6 +61,10 @@ Clicking a remote agent moves focus on that machine's server. You only see it if
 
 ### Rex
 
+<p align="center">
+  <img src="screenshots/rex.png" width="400" alt="The menu in Rex mode with both open: the herdr / Rex switch at the top, then agents, Switch session and the Session, Tab and Pane submenus">
+</p>
+
 The menu drives whichever of **herdr** and **[Rex](https://www.superlogical.com/rex)** is open. When both are, a switch at the top of the menu picks one. In Rex mode the menu bar shows Rex's mascot instead of the sheep, and the menu works the same way, in Rex's words:
 
 - **Agents** are terminals whose program reports a status to Rex (OSC 7501, as Claude Code does), with the same dots and badge. Click one to show its session in the Rex app and focus it.
@@ -63,6 +76,10 @@ The menu drives whichever of **herdr** and **[Rex](https://www.superlogical.com/
 The icon shows while a herdr client or the Rex app is open. The badge counts the agents of the one the menu drives. It needs the `rex` CLI that comes with Rex.
 
 ### Settings
+
+<p align="center">
+  <img src="screenshots/settings.png" width="249" alt="The Show submenu: Agents and workspaces, Agents only, Workspaces only">
+</p>
 
 - **herdr / Rex** at the top, while both are open: which one the menu drives (`defaults write dev.pierre-charles.herdr-menu backend rex`).
 - **Show**: agents and workspaces (default), agents only, or workspaces only (listed in the menu itself rather than under **Switch workspace**).
@@ -104,7 +121,7 @@ Untick **Launch at login**, choose **Quit**, then delete `~/Applications/HerdrMe
 ## Notes
 
 - The keybinds shown are your own: the menu reads `~/.config/herdr/config.toml` each time it opens and resolves them the way herdr does (your `prefix` and `[keys]` entries win, and a default that shares a key with one of your bindings, including `[[keys.command]]` keys, is dropped). Bindings must be on one line, e.g. `new_tab = "prefix+t"` or `new_tab = ["prefix+t", "ctrl+alt+t"]`; the first one is shown.
-- The screenshots were made with a demo mode (made-up workspaces and agents) that has since been removed. To retake them, restore it from commit `bb7e941`.
+- The screenshots show made-up workspaces and agents, from fake `herdr` and `rex` CLIs fed to a throwaway copy of the app, so no real names reach the repo.
 - Status colours are herdr's Catppuccin palette, its default theme.
 - The app icon is herdr's logo (`logo.png`), and the menu bar icon is the same logo converted to a template image (`sheep.png`). Rex's mascot isn't in the repo: the app makes it from the image in your installed Rex app.
 
