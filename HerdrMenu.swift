@@ -215,15 +215,17 @@ struct RexKeymap {
 
 // MARK: - herdr
 
+// Drop herdr's caller context (HERDR_PANE_ID etc.) in case this app was launched from a herdr pane:
+// the CLI would treat that pane as the caller, so "current pane" and splits would ignore what's focused.
+// Rex's (REX_SESSION, REX_BLOCK) likewise.
+let cliEnvironment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("HERDR_") && !$0.key.hasPrefix("REX_") }
+
 // timeout: kill the call after this many seconds, for remote machines whose SSH link may hang
 func run(_ args: [String], exe: String = herdrCLI, timeout: TimeInterval? = nil) -> (ok: Bool, out: Data, err: String) {
     let p = Process(), out = Pipe(), err = Pipe()
     p.executableURL = URL(fileURLWithPath: exe)
     p.arguments = args
-    // Drop herdr's caller context (HERDR_PANE_ID etc.) in case this app was launched from a herdr pane:
-    // the CLI would treat that pane as the caller, so "current pane" and splits would ignore what's focused.
-    // Rex's (REX_SESSION, REX_BLOCK) likewise.
-    p.environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("HERDR_") && !$0.key.hasPrefix("REX_") }
+    p.environment = cliEnvironment
     p.standardOutput = out
     p.standardError = err
     do { try p.run() } catch { return (false, Data(), error.localizedDescription) }
@@ -275,10 +277,12 @@ func herdrResult(_ args: [String], timeout: TimeInterval? = nil) -> Result? {
 
 // Rex has no snapshot call, so this script builds herdr's from the server API: sessions as workspaces,
 // windows as tabs, blocks as panes, and a terminal whose program reports a status (OSC 7501, as Claude Code
-// does) as an agent, with its most urgent record. Rex doesn't say which session the app is showing, so
-// nothing is focused. Viewing a session needs attaching to it first. `rex do` prints the returned text as a JSON string.
+// does) as an agent, with its most urgent record. `visible=<session>` (from rexVisibleScript) marks that session,
+// its active window and that window's focused block as focused, like herdr's snapshot; without it nothing is.
+// Viewing a session needs attaching to it first. `rex do` prints the returned text as a JSON string.
 // ponytail: an empty Lua table encodes as {}, so ":{}" becomes ":[]", which a label containing ":{} would hit too.
 let rexSnapshotScript = """
+local visible = (rex.args or {}).visible
 local term = "com.superlogical.terminal"
 local rank = {blocked = 1, done = 2, working = 3, idle = 4}
 local function urgent(a, b)
@@ -287,12 +291,15 @@ local function urgent(a, b)
 end
 local snap = {workspaces = {}, tabs = {}, agents = {}, panes = {}}
 for _, s in ipairs((rex.call("session.attach_all", {event_scope = "session"}) or {}).sessions or {}) do
-  local ws = {workspace_id = s.session_id, label = s.label, pane_count = 0}
-  for _, w in ipairs((rex.call("session.view", {session_id = s.session_id}) or {}).windows or {}) do
-    local tab = {workspace_id = s.session_id, tab_id = w.window_id, label = w.label, pane_count = 0}
+  local ws = {workspace_id = s.session_id, label = s.label, pane_count = 0, focused = s.session_id == visible or nil}
+  local view = rex.call("session.view", {session_id = s.session_id}) or {}
+  for _, w in ipairs(view.windows or {}) do
+    local tab = {workspace_id = s.session_id, tab_id = w.window_id, label = w.label, pane_count = 0,
+                 focused = ws.focused and w.window_id == view.active_window_id or nil}
     for _, layer in ipairs(w.layers or {}) do
       for _, b in ipairs(layer.blocks or {}) do
-        local pane = {pane_id = b.block_id, tab_id = w.window_id, workspace_id = s.session_id, terminal_title_stripped = b.label}
+        local pane = {pane_id = b.block_id, tab_id = w.window_id, workspace_id = s.session_id, terminal_title_stripped = b.label,
+                      focused = tab.focused and b.block_id == w.focused_block_id or nil}
         if b.creator_name == term then
           local at = {session_id = s.session_id, block_id = b.block_id}
           pane.terminal_title_stripped = (rex.call(term .. ".title", at) or {}).title
@@ -318,6 +325,17 @@ for _, s in ipairs((rex.call("session.attach_all", {event_scope = "session"}) or
   table.insert(snap.workspaces, ws)
 end
 return (rex.json.encode({result = {snapshot = snap}}):gsub(":{}", ":[]"))
+"""
+
+// The Rex server doesn't say which session the app is showing, but the app re-sends a session's terminal sizes
+// each time it shows it. So this prints the session of every resize from the app, and the last one is on screen.
+// ponytail: local Rex only (hosts' sessions are never named), and with two Rex windows the last one resized wins
+let rexVisibleScript = """
+rex.on("terminal.size_changed", function(ctx, ev)
+  for _, c in ipairs((rex.call("client.list") or {}).clients or {}) do
+    if c.client_id == ev.owner and c.info.kind == "app" then print(ctx.session_id) end
+  end
+end)
 """
 
 // Show a session in the Rex app, and focus a block in it first (which also makes its window active)
@@ -347,9 +365,11 @@ struct Machine: Equatable {
     var timeout: TimeInterval? { id == nil ? nil : 3 }
     func result(_ args: [String]) -> Result? { herdrResult(cmd(args), timeout: timeout) }
 
-    func snapshot() -> Snapshot? {
+    // rexVisible: the session the Rex app shows (only known for Local)
+    func snapshot(rexVisible: String? = nil) -> Snapshot? {
         guard backend == .rex else { return result(["api", "snapshot"])?.snapshot }
-        let text = try? decoder.decode(String.self, from: run(cmd(["do", "-e", rexSnapshotScript]), exe: rexCLI, timeout: timeout).out)
+        let visible = (id == nil ? rexVisible : nil).map { ["visible=" + $0] } ?? []
+        let text = try? decoder.decode(String.self, from: run(cmd(["do", "-e", rexSnapshotScript] + visible), exe: rexCLI, timeout: timeout).out)
         return text.flatMap { try? decoder.decode(Response.self, from: Data($0.utf8)) }?.result.snapshot
     }
     func agents() -> [Pane]? { backend == .herdr ? result(["agent", "list"])?.agents : snapshot()?.agents }
@@ -582,6 +602,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // The menu drives whichever of herdr and Rex is open, or the picked one when both are
     var running: [Backend] = []
     var backend: Backend { running.count == 1 ? running[0] : pickedBackend }
+    // The session the Rex app shows, from rexVisibleScript, which runs while the Rex app is open
+    var rexVisible: String?
+    var rexWatcher: Process?
     var target: Machine {
         let pick = setting(Setting.machines) == "one" ? picked : nil
         return [pick, tuiSelected].compactMap { $0 }.first(where: machines.contains) ?? machines[0]
@@ -643,11 +666,31 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.refreshing = false
                 guard picked == pickedBackend else { return self.refresh() } // switched while this one ran
                 self.running = running
+                if running.contains(.rex) { self.watchRex() }
                 self.machines = all
                 if selected != self.tuiSelected { self.tuiSelected = selected; self.picked = nil }
                 self.show(visible: visible, statuses: lists.flatMap { $0 ?? [] }.compactMap(\.agentStatus))
             }
         }
+    }
+
+    // Starts rexVisibleScript unless it's running; if it stops (the Rex server restarted), the next refresh starts it again
+    func watchRex() {
+        guard rexWatcher?.isRunning != true else { return }
+        let p = Process(), out = Pipe()
+        p.executableURL = URL(fileURLWithPath: rexCLI)
+        p.arguments = ["do", "--all", "-e", rexVisibleScript]
+        p.environment = cliEnvironment
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        out.fileHandleForReading.readabilityHandler = { h in
+            let data = h.availableData
+            guard !data.isEmpty else { h.readabilityHandler = nil; return }
+            guard let last = String(decoding: data, as: UTF8.self).split(separator: "\n").last else { return }
+            DispatchQueue.main.async { self.rexVisible = String(last) }
+        }
+        try? p.run()
+        rexWatcher = p
     }
 
     func show(visible: Bool, statuses: [String]) {
@@ -695,7 +738,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let all = machines[0].backend == b ? machines : [b.local], multi = all.count > 1, target = all.contains(target) ? target : all[0]
         let together = !multi || setting(Setting.machines) == "all"
         let shown = together ? all : [target]
-        let snaps = fetch(shown) { $0.snapshot() }
+        let rexVisible = rexVisible
+        let snaps = fetch(shown) { $0.snapshot(rexVisible: rexVisible) }
         let list = setting(Setting.show)
         func names(_ snap: Snapshot?) -> [String: String] {
             Dictionary(((snap?.workspaces ?? []) + (snap?.tabs ?? [])).map { ($0.tabId ?? $0.workspaceId, $0.label) }) { first, _ in first }
@@ -732,7 +776,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Then biggest to smallest, like herdr: workspace, tab, pane, each a submenu named after the focused one,
         // which is where its actions land: the target machine (with every machine shown, the one the TUI shows).
-        // Rex's actions land wherever the Rex app has focus, which the server doesn't report, so its rows name nothing.
+        // Rex's actions land wherever the Rex app has focus, so its rows name what's focused in the session it shows,
+        // and nothing until the app has shown one since the menu started (see rexVisibleScript).
         let snap = shown.firstIndex(of: target).flatMap { snaps[$0] }
         let n = names(snap)
         let pane = snap?.panes.first { $0.focused == true }
