@@ -62,7 +62,7 @@ Clicking a remote agent moves focus on that machine's server. You only see it if
 ### Rex
 
 <p align="center">
-  <img src="screenshots/rex.png" width="400" alt="The menu in Rex mode with both open: the herdr / Rex switch at the top, then agents, Switch session and the Session, Tab and Pane submenus">
+  <img src="screenshots/rex.png" width="400" alt="The menu in Rex mode with both open: the herdr / Rex switch at the top, then agents with a checkmark on the one in the session Rex shows, Switch session, and the Session, Tab and Pane submenus named after that session">
 </p>
 
 The menu drives whichever of **herdr** and **[Rex](https://www.superlogical.com/rex)** is open. When both are, a switch at the top of the menu picks one. In Rex mode the menu bar shows Rex's mascot instead of the sheep, and the menu works the same way, in Rex's words:
@@ -70,7 +70,8 @@ The menu drives whichever of **herdr** and **[Rex](https://www.superlogical.com/
 - **Agents** are terminals whose program reports a status to Rex (OSC 7501, as Claude Code does), with the same dots and badge. Click one to show its session in the Rex app and focus it.
 - **Workspaces are sessions**, tabs are tabs (Rex's windows), and panes are panes (Rex's blocks). Swap is **Move**, Rex's name for it.
 - **Machines are hosts**: everything in `rex hosts` is listed, through `rex -S <host> ...`.
-- The actions run the Rex app's own actions (`rex do pane.split.right` and so on), so they act on whatever has focus in Rex. Renaming uses the app's inline rename, and new tabs and sessions don't ask for a name. The section rows name the session, tab and pane the Rex app is showing, with a checkmark on that session and its agents. The Rex server doesn't report this directly, so the menu works it out from the app resizing a session's terminals when it shows them. Until you switch sessions once after the menu starts, nothing is named.
+- The actions run the Rex app's own actions (`rex do pane.split.right` and so on), so they act on whatever has focus in Rex. Renaming uses the app's inline rename, and new tabs and sessions don't ask for a name.
+- **The section rows name the session, tab and pane the Rex app is showing,** with a checkmark on that session and its agents, as in herdr mode. The Rex server doesn't report which session the app shows, so the menu works it out from the app resizing a session's terminals when it shows them. Until you switch sessions once after the menu starts, nothing is named.
 - Keybinds shown are the ones in your `init.lua` (`rex keymap`). The app's built-in shortcuts aren't visible to the server, so they don't show.
 
 The icon shows while a herdr client or the Rex app is open. The badge counts the agents of the one the menu drives. It needs the `rex` CLI that comes with Rex.
