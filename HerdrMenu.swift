@@ -481,16 +481,18 @@ func herdrClientPID() -> String? {
 // openApplication is what the Dock does, so it works from a menu bar app where activate() may not.
 // ponytail: raises the app's frontmost window, not necessarily the herdr one if the terminal has several.
 // Rex is its own app, so that's what comes forward.
+// The app the herdr client runs in: macOS puts the launching app's bundle ID in every child's environment
+func herdrTerminal() -> String? {
+    guard let pid = herdrClientPID() else { return nil }
+    let env = String(decoding: run(["eww", "-o", "command=", "-p", pid], exe: "/bin/ps").out, as: UTF8.self)
+    guard let entry = env.split(separator: " ").first(where: { $0.hasPrefix("__CFBundleIdentifier=") }),
+          let id = entry.split(separator: "=", maxSplits: 1).last else { return nil }
+    return String(id)
+}
+
 func bringTerminalForward(_ backend: Backend) {
-    var bundle = rexBundle
-    if backend == .herdr {
-        guard let pid = herdrClientPID() else { return }
-        let env = String(decoding: run(["eww", "-o", "command=", "-p", pid], exe: "/bin/ps").out, as: UTF8.self)
-        guard let entry = env.split(separator: " ").first(where: { $0.hasPrefix("__CFBundleIdentifier=") }),
-              let id = entry.split(separator: "=", maxSplits: 1).last else { return }
-        bundle = String(id)
-    }
-    guard let url = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first?.bundleURL else { return }
+    guard let bundle = backend == .herdr ? herdrTerminal() : rexBundle,
+          let url = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first?.bundleURL else { return }
     NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
 }
 
@@ -603,7 +605,11 @@ enum Setting {
     // Which action sections show, each "on" (default) or "off": actions.workspace, actions.tab, actions.pane
     static let sections = [("workspace", "Workspace actions"), ("tab", "Tab actions"), ("pane", "Pane actions")]
     static func section(_ kind: String) -> String { "actions." + kind }
-    static let defaults = [backend: backendChoices[0].value, show: showChoices[0].value, machines: machineChoices[0].value]
+    // The notch island (IslandModel.swift): shown while Rex is open, its sounds, and its height
+    static let island = "island", islandSounds = "island.sounds", islandHeight = "island.height"
+    static let heightChoices: [(value: String, title: String)] = [(value: "notch", title: "Match the notch"), ("menubar", "Match the menu bar")]
+    static let defaults = [backend: backendChoices[0].value, show: showChoices[0].value, machines: machineChoices[0].value,
+                           island: "on", islandSounds: "on", islandHeight: heightChoices[0].value]
         .merging(sections.map { (section($0.0), "on") }) { $1 }
 }
 
@@ -634,13 +640,14 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // The session the Rex app shows, from rexVisibleScript, which runs while the Rex app is open
     var rexVisible: String?
     var rexWatcher: Process?
+    var rexDone = RexDone()
+    var island: Island?
     var target: Machine {
         let pick = setting(Setting.machines) == "one" ? picked : nil
         return [pick, tuiSelected].compactMap { $0 }.first(where: machines.contains) ?? machines[0]
     }
 
     // The status badge: a 7pt dot in an 11pt notch cut from the icon's bottom-right corner.
-    var rexDone = RexDone()
     // The icon stays a template image (macOS tints it for light/dark); only the dot is coloured.
     let iconSize: CGFloat = 18, dotSize: CGFloat = 7, notchSize: CGFloat = 11
 
@@ -692,11 +699,16 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let b = running.count == 1 ? running[0] : picked
             let (all, selected) = visible ? loadMachines(b) : ([b.local], nil)
             let lists = visible ? fetch(all) { $0.agents() } : []
+            // The island shows herdr's local agents alongside Rex's, whichever the menu drives
+            let herdr = running.contains(.herdr) && setting(Setting.island) == "on" ? Machine.local.snapshot() : nil
+            let herdrInFront = herdr != nil && herdrTerminal() == NSWorkspace.shared.frontmostApplication?.bundleIdentifier
             DispatchQueue.main.async {
                 self.refreshing = false
                 guard picked == pickedBackend else { return self.refresh() } // switched while this one ran
                 self.running = running
                 if running.contains(.rex) { self.watchRex() }
+                self.showIsland()
+                self.island?.model.setHerdr(herdr, terminalInFront: herdrInFront)
                 self.machines = all
                 if selected != self.tuiSelected { self.tuiSelected = selected; self.picked = nil }
                 if b == .rex, let local = lists.first ?? nil {
@@ -709,6 +721,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.show(visible: visible, statuses: statuses.compactMap { $0 })
             }
         }
+    }
+
+    // The notch island shows while herdr or the Rex app is open and Island › Show island is on
+    func showIsland() {
+        let on = !running.isEmpty && setting(Setting.island) == "on"
+        if on, island == nil { island = Island() }
+        island?.show(on)
     }
 
     // Starts rexVisibleScript unless it's running; if it stops (the Rex server restarted), the next refresh starts it again
@@ -854,13 +873,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let actions = menuItem("Actions", icon: "slider.horizontal.3", action: nil)
         actions.submenu = NSMenu()
         for (kind, title) in Setting.sections {
-            let row = NSMenuItem(title: b.words(title), action: #selector(toggleSection(_:)), keyEquivalent: "")
-            row.target = self
-            row.representedObject = kind
-            row.state = setting(Setting.section(kind)) == "on" ? .on : .off
-            actions.submenu?.addItem(row)
+            actions.submenu?.addItem(toggleRow(b.words(title), key: Setting.section(kind)))
         }
         menu.addItem(actions)
+        menu.addItem(islandMenu())
         if multi {
             menu.addItem(settingMenu(b.words("Machines"), icon: "server.rack", key: Setting.machines, choices: Setting.machineChoices))
         }
@@ -944,16 +960,57 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return mi
     }
 
-    @objc func toggleSection(_ sender: NSMenuItem) {
-        guard let kind = sender.representedObject as? String else { return }
-        let key = Setting.section(kind)
+    // A row with a checkmark that flips an "on"/"off" setting
+    func toggleRow(_ title: String, key: String) -> NSMenuItem {
+        let row = NSMenuItem(title: title, action: #selector(toggleSetting(_:)), keyEquivalent: "")
+        row.target = self
+        row.representedObject = key
+        row.state = setting(key) == "on" ? .on : .off
+        return row
+    }
+
+    // Island ›: show it, sounds, height, and the Claude Code hooks for its permission and plan cards
+    func islandMenu() -> NSMenuItem {
+        let mi = menuItem("Island", icon: "capsule", action: nil)
+        let heights = Setting.heightChoices.map { c in
+            let row = NSMenuItem(title: c.title, action: #selector(choose(_:)), keyEquivalent: "")
+            row.target = self
+            row.representedObject = [Setting.islandHeight, c.value]
+            row.state = setting(Setting.islandHeight) == c.value ? .on : .off
+            return row
+        }
+        let installed = claudeHooksInstalled()
+        let hooks = NSMenuItem(title: installed ? "Remove Claude Code hooks" : "Install Claude Code hooks…",
+                               action: #selector(toggleClaudeHooks), keyEquivalent: "")
+        hooks.target = self
+        mi.submenu = NSMenu()
+        mi.submenu?.items = [toggleRow("Show island", key: Setting.island), toggleRow("Sounds", key: Setting.islandSounds), .separator(),
+                             .sectionHeader(title: "Height")] + heights + [.separator(), hooks]
+        return mi
+    }
+
+    @objc func toggleSetting(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
         UserDefaults.standard.set(setting(key) == "on" ? "off" : "on", forKey: key)
+        showIsland()
     }
 
     @objc func choose(_ sender: NSMenuItem) {
         guard let kv = sender.representedObject as? [String] else { return }
         UserDefaults.standard.set(kv[1], forKey: kv[0])
         if kv[0] == Setting.backend { picked = nil; refresh() }
+        showIsland()
+    }
+
+    // Editing ~/.claude/settings.json is a big step, so installing asks first
+    @objc func toggleClaudeHooks() {
+        let installing = !claudeHooksInstalled()
+        if installing {
+            guard ask("Install Claude Code hooks?",
+                      "This adds three hooks to ~/.claude/settings.json, so the island can show what each agent is doing and its permission and plan cards. Claude carries on as normal when the menu isn't running. Restart your Claude sessions to pick them up.",
+                      button: "Install Hooks") else { return }
+        }
+        if let error = setClaudeHooks(installed: installing) { alert(error) }
     }
 
     @objc func pick(_ sender: NSMenuItem) {
@@ -1051,7 +1108,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 }
 
-if CommandLine.arguments.contains("--self-test") {
+// `HerdrMenu --self-test` (see main.swift)
+func selfTest() -> Never {
     precondition(isHerdrClient("herdr"))
     precondition(isHerdrClient("/Users/me/.local/bin/herdr --session work"))
     precondition(isHerdrClient("herdr session attach work"))
@@ -1100,15 +1158,6 @@ if CommandLine.arguments.contains("--self-test") {
     precondition(snap.agents[0].agentStatus == "blocked" && displayName(snap.agents[0]) == "claude")
     precondition(displayName(snap.panes[0]) == "site") // empty title falls back to the folder
     precondition(rank("blocked") < rank("idle") && rank("idle") < rank(nil))
-    print("self-test ok")
-    exit(0)
-}
-
-let app = NSApplication.shared
-let delegate = App()
-app.delegate = delegate
-app.setActivationPolicy(.accessory)
-app.run()
     // A Rex agent is done from when it finishes until its session is seen
     let agent = { (status: String) in
         Pane(paneId: "b1", tabId: "w1", workspaceId: "s1", agent: "claude", agentStatus: status, terminalTitleStripped: nil, cwd: nil, focused: nil)
@@ -1123,3 +1172,7 @@ app.run()
     precondition(done.status(agent("done")) == "idle")
     done.update([]) { _ in false } // closed
     precondition(done.unseen.isEmpty)
+    print("self-test ok")
+    exit(0)
+}
+

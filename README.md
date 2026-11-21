@@ -22,6 +22,7 @@
 - **One-click actions** for panes (split, zoom, focus, resize, swap, close), tabs and workspaces (new, rename, close), each section in a submenu named after the focused one, plus **Switch workspace** to jump between your workspaces.
   **New tab…** and **New workspace…** ask for a name first; hold **⌥ Option** for the quick versions, which create them straight away like herdr's keybinds.
 - **herdr's keybind next to each action,** so the menu doubles as a cheat sheet.
+- **An island around your MacBook's notch** for your herdr and Rex agents: what each one is doing, a ping when one needs you, and permission and plan cards you can answer from the notch (see [the island](#the-island) below).
 
 ### Submenus
 
@@ -76,6 +77,31 @@ The menu drives whichever of **herdr** and **[Rex](https://www.superlogical.com/
 
 The icon shows while a herdr client or the Rex app is open. The badge counts the agents of the one the menu drives. It needs the `rex` CLI that comes with Rex.
 
+### The island
+
+<p align="center">
+  <img src="screenshots/island-collapsed.png" width="221" alt="The collapsed island around the notch: an orange hand on the left and the number 1 on the right">
+</p>
+
+<p align="center">
+  <img src="screenshots/island-expanded.png" width="456" alt="The island expanded: a permission card for an edit to middleware.ts with a diff and Deny, Always allow and Allow buttons, then four agents with what each is doing">
+</p>
+
+While herdr or Rex is open, a black pill sits around your MacBook's notch, a bit like the iPhone's Dynamic Island. It shows the agents of both, whichever one the menu drives:
+
+- **The sides of the notch** show the most urgent thing: ✋ when an agent needs you, ✓ when one has finished and you haven't looked at it yet, a spinning ✦ while agents work. The number is how many. When nothing's happening, the pill hides behind the notch.
+- **Hover** to see every agent: its workspace or session, what it's doing right now ("Editing api-reference.md", "Running terraform plan") and for how long. A finished one shows your last prompt. Click one to jump to it.
+- **Permission requests drop down from the notch** with the command or diff: Deny, Allow, or Always allow when Claude offers a rule. The prompt in the terminal still works too, and whichever you answer first wins.
+- **Plans** from plan mode show up with their Markdown, and Keep planning or Approve plan.
+- **It pings you** with a drop-down and a sound when an agent gets blocked or finishes, except when you're already looking at it: Rex in front showing that session, or herdr's terminal in front on that workspace.
+- **Colours** are Catppuccin Macchiato in dark mode and Latte in light mode, with the Catppuccin colour nearest your macOS accent colour. The pill itself stays black, so it blends with the notch.
+
+| Plan review | Light mode |
+|:---:|:---:|
+| <img src="screenshots/island-plan.png" width="400" alt="A plan card: Split the API reference, with headings, bullets and Keep planning and Approve plan buttons"> | <img src="screenshots/island-light.png" width="330" alt="The expanded island in the Latte light theme with a blue Allow button"> |
+
+The agents and their states come from herdr, and from Rex (Claude Code reports them there with OSC 7501). A Rex agent's ✓ stays until you look at its session, like herdr's own done. For what each one is doing, and the permission and plan cards, install the Claude Code hooks with **Island › Install Claude Code hooks…**, then restart your Claude sessions. That adds three hooks to `~/.claude/settings.json` which run this app with `--hook`. If the menu isn't running, or a session isn't in a herdr or Rex pane, the hook exits straight away and Claude carries on as normal. On a screen without a notch, the island is a small pill at the top centre.
+
 ### Settings
 
 <p align="center">
@@ -86,6 +112,7 @@ The icon shows while a herdr client or the Rex app is open. The badge counts the
 - **Show**: agents and workspaces (default), agents only, or workspaces only (listed in the menu itself rather than under **Switch workspace**).
 - **Actions**: turn the Workspace, Tab and Pane submenus on or off (all on by default). **Switch workspace** stays either way.
 - **Machines** (**Hosts** for Rex): all together or one at a time (only with saved SSH machines or Rex hosts).
+- **Island**: show the island, its sounds, its height (the notch's, or down to where the menu bar ends), and install or remove the Claude Code hooks.
 
 These are stored in the app's defaults, e.g. `defaults write dev.pierre-charles.herdr-menu show agents` or `defaults write dev.pierre-charles.herdr-menu actions.pane off`.
 
@@ -117,7 +144,7 @@ git pull
 
 ## Uninstall
 
-Untick **Launch at login**, choose **Quit**, then delete `~/Applications/HerdrMenu.app`.
+If you installed the Claude Code hooks, choose **Island › Remove Claude Code hooks** first. Then untick **Launch at login**, choose **Quit**, and delete `~/Applications/HerdrMenu.app`.
 
 ## Notes
 

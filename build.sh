@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 bundle="$HOME/Applications/HerdrMenu.app"
 app="$bundle/Contents"
 mkdir -p "$app/MacOS" "$app/Resources"
-swiftc HerdrMenu.swift -o "$app/MacOS/HerdrMenu"
+swiftc -swift-version 5 *.swift -o "$app/MacOS/HerdrMenu"
 cp sheep.png "$app/Resources/"
 # App icon from herdr's logo (logo.png, 512px): an iconset of every size up to 512, packed into AppIcon.icns
 iconset=$(mktemp -d)/AppIcon.iconset
@@ -27,6 +27,8 @@ cat > "$app/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSUIElement</key><true/>
+  <!-- App Nap would hold back the island's mouse-moved events, so hovering the notch did nothing -->
+  <key>NSAppSleepDisabled</key><true/>
 </dict></plist>
 PLIST
 # Ad-hoc signature over the whole bundle (no developer account needed); macOS login items check it
