@@ -67,7 +67,7 @@ Clicking a remote agent moves focus on that machine's server. You only see it if
 
 The menu drives whichever of **herdr** and **[Rex](https://www.superlogical.com/rex)** is open. When both are, a switch at the top of the menu picks one. In Rex mode the menu bar shows Rex's mascot instead of the sheep, and the menu works the same way, in Rex's words:
 
-- **Agents** are terminals whose program reports a status to Rex (OSC 7501, as Claude Code does), with the same dots and badge. Click one to show its session in the Rex app and focus it.
+- **Agents** are terminals whose program reports a status to Rex (OSC 7501, as Claude Code does), with the same dots and badge. Click one to show its session in the Rex app and focus it. Rex keeps an agent done until it works again, so the menu does what herdr does: an agent is done (teal) from when it finishes until you look at its session in the Rex app, then idle. Agents that finished before the menu started count as seen.
 - **Workspaces are sessions**, tabs are tabs (Rex's windows), and panes are panes (Rex's blocks). Swap is **Move**, Rex's name for it.
 - **Machines are hosts**: everything in `rex hosts` is listed, through `rex -S <host> ...`.
 - The actions run the Rex app's own actions (`rex do pane.split.right` and so on), so they act on whatever has focus in Rex. Renaming uses the app's inline rename, and new tabs and sessions don't ask for a name.

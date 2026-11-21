@@ -279,10 +279,17 @@ func herdrResult(_ args: [String], timeout: TimeInterval? = nil) -> Result? {
 // windows as tabs, blocks as panes, and a terminal whose program reports a status (OSC 7501, as Claude Code
 // does) as an agent, with its most urgent record. `visible=<session>` (from rexVisibleScript) marks that session,
 // its active window and that window's focused block as focused, like herdr's snapshot; without it nothing is.
+// `unseen=<blocks>` (from RexDone) keeps only those agents done and reports the others' done as idle, dots included.
 // Viewing a session needs attaching to it first. `rex do` prints the returned text as a JSON string.
 // ponytail: an empty Lua table encodes as {}, so ":{}" becomes ":[]", which a label containing ":{} would hit too.
 let rexSnapshotScript = """
 local visible = (rex.args or {}).visible
+local unseen = (rex.args or {}).unseen
+if unseen then
+  local ids = {}
+  for id in unseen:gmatch("[^,]+") do ids[id] = true end
+  unseen = ids
+end
 local term = "com.superlogical.terminal"
 local rank = {blocked = 1, done = 2, working = 3, idle = 4}
 local function urgent(a, b)
@@ -307,7 +314,9 @@ for _, s in ipairs((rex.call("session.attach_all", {event_scope = "session"}) or
           pane.cwd = pwd and pwd:gsub("^file://[^/]*", "")
           for _, r in ipairs((rex.call(term .. ".program_status", at) or {}).records or {}) do
             pane.agent = pane.agent or r.effective_app or "program"
-            pane.agent_status = urgent(pane.agent_status, r.state)
+            local state = r.state
+            if unseen and state == "done" and not unseen[b.block_id] then state = "idle" end
+            pane.agent_status = urgent(pane.agent_status, state)
           end
         end
         tab.pane_count = tab.pane_count + 1
@@ -338,6 +347,26 @@ rex.on("terminal.size_changed", function(ctx, ev)
 end)
 """
 
+// Rex keeps an agent "done" until it works again, where herdr turns it back to idle once you've looked at it.
+// So, like herdr, a Rex agent is done from when it finishes until you've seen its session in the Rex app.
+// ponytail: Local only, and anything that finished before the menu started counts as seen
+struct RexDone {
+    var unseen: Set<String> = [] // blocks
+    var last: [String: String] = [:] // block -> status at the last refresh
+
+    // looking: the Rex app is in front, showing that agent's session
+    mutating func update(_ agents: [Pane], looking: (Pane) -> Bool) {
+        for a in agents {
+            if a.agentStatus == "done", let old = last[a.paneId], old != "done", !looking(a) { unseen.insert(a.paneId) }
+            if a.agentStatus != "done" || looking(a) { unseen.remove(a.paneId) }
+        }
+        unseen.formIntersection(agents.map(\.paneId))
+        last = Dictionary(agents.map { ($0.paneId, $0.agentStatus ?? "") }) { first, _ in first }
+    }
+    func status(_ a: Pane) -> String? { a.agentStatus == "done" && !unseen.contains(a.paneId) ? "idle" : a.agentStatus }
+    var arg: String { "unseen=" + (unseen.isEmpty ? "none" : unseen.sorted().joined(separator: ",")) }
+}
+
 // Show a session in the Rex app, and focus a block in it first (which also makes its window active)
 let rexShowScript = """
 local a = rex.args
@@ -365,11 +394,11 @@ struct Machine: Equatable {
     var timeout: TimeInterval? { id == nil ? nil : 3 }
     func result(_ args: [String]) -> Result? { herdrResult(cmd(args), timeout: timeout) }
 
-    // rexVisible: the session the Rex app shows (only known for Local)
-    func snapshot(rexVisible: String? = nil) -> Snapshot? {
+    // rexVisible: the session the Rex app shows; rexUnseen: RexDone.arg. Both only known for Local.
+    func snapshot(rexVisible: String? = nil, rexUnseen: String? = nil) -> Snapshot? {
         guard backend == .rex else { return result(["api", "snapshot"])?.snapshot }
-        let visible = (id == nil ? rexVisible : nil).map { ["visible=" + $0] } ?? []
-        let text = try? decoder.decode(String.self, from: run(cmd(["do", "-e", rexSnapshotScript] + visible), exe: rexCLI, timeout: timeout).out)
+        let local = id == nil ? [rexVisible.map { "visible=" + $0 }, rexUnseen].compactMap { $0 } : []
+        let text = try? decoder.decode(String.self, from: run(cmd(["do", "-e", rexSnapshotScript] + local), exe: rexCLI, timeout: timeout).out)
         return text.flatMap { try? decoder.decode(Response.self, from: Data($0.utf8)) }?.result.snapshot
     }
     func agents() -> [Pane]? { backend == .herdr ? result(["agent", "list"])?.agents : snapshot()?.agents }
@@ -611,6 +640,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // The status badge: a 7pt dot in an 11pt notch cut from the icon's bottom-right corner.
+    var rexDone = RexDone()
     // The icon stays a template image (macOS tints it for light/dark); only the dot is coloured.
     let iconSize: CGFloat = 18, dotSize: CGFloat = 7, notchSize: CGFloat = 11
 
@@ -669,7 +699,14 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if running.contains(.rex) { self.watchRex() }
                 self.machines = all
                 if selected != self.tuiSelected { self.tuiSelected = selected; self.picked = nil }
-                self.show(visible: visible, statuses: lists.flatMap { $0 ?? [] }.compactMap(\.agentStatus))
+                if b == .rex, let local = lists.first ?? nil {
+                    let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == rexBundle
+                    self.rexDone.update(local) { front && $0.workspaceId == self.rexVisible }
+                }
+                let statuses = zip(all, lists).flatMap { m, list in
+                    (list ?? []).map { b == .rex && m.id == nil ? self.rexDone.status($0) : $0.agentStatus }
+                }
+                self.show(visible: visible, statuses: statuses.compactMap { $0 })
             }
         }
     }
@@ -738,8 +775,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let all = machines[0].backend == b ? machines : [b.local], multi = all.count > 1, target = all.contains(target) ? target : all[0]
         let together = !multi || setting(Setting.machines) == "all"
         let shown = together ? all : [target]
-        let rexVisible = rexVisible
-        let snaps = fetch(shown) { $0.snapshot(rexVisible: rexVisible) }
+        let rexVisible = rexVisible, rexUnseen = rexDone.arg
+        let snaps = fetch(shown) { $0.snapshot(rexVisible: rexVisible, rexUnseen: rexUnseen) }
         let list = setting(Setting.show)
         func names(_ snap: Snapshot?) -> [String: String] {
             Dictionary(((snap?.workspaces ?? []) + (snap?.tabs ?? [])).map { ($0.tabId ?? $0.workspaceId, $0.label) }) { first, _ in first }
@@ -1072,3 +1109,17 @@ let delegate = App()
 app.delegate = delegate
 app.setActivationPolicy(.accessory)
 app.run()
+    // A Rex agent is done from when it finishes until its session is seen
+    let agent = { (status: String) in
+        Pane(paneId: "b1", tabId: "w1", workspaceId: "s1", agent: "claude", agentStatus: status, terminalTitleStripped: nil, cwd: nil, focused: nil)
+    }
+    var done = RexDone()
+    done.update([agent("done")]) { _ in false } // already done when the menu started: counts as seen
+    precondition(done.status(agent("done")) == "idle" && done.arg == "unseen=none")
+    done.update([agent("working")]) { _ in false }
+    done.update([agent("done")]) { _ in false } // finished while I was elsewhere
+    precondition(done.status(agent("done")) == "done" && done.arg == "unseen=b1")
+    done.update([agent("done")]) { _ in true } // then looked at it in Rex
+    precondition(done.status(agent("done")) == "idle")
+    done.update([]) { _ in false } // closed
+    precondition(done.unseen.isEmpty)
