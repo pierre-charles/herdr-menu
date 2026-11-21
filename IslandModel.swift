@@ -85,6 +85,7 @@ final class Model: ObservableObject {
     var collapsedWidth: CGFloat { geo.notch + (showEars ? 2 * ear : 0) }
     var panelWidth: CGFloat { requests.contains { $0.tool == "ExitPlanMode" } ? 540 : 440 }
     func item(_ block: String) -> Item? { items.first { $0.block == block } }
+    var bothApps: Bool { !rexItems.isEmpty && !herdrItems.isEmpty }
 
     // MARK: Rex status
 

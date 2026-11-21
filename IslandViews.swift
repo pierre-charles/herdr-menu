@@ -125,8 +125,12 @@ struct Row: View {
                         .contentTransition(.opacity)
                 }
                 Spacer(minLength: 8)
-                TimelineView(.periodic(from: .now, by: 30)) { _ in
-                    Text(short(m.since[i.block])).font(.system(size: 11).monospacedDigit()).foregroundStyle(t.overlay)
+                VStack(alignment: .trailing, spacing: 2) {
+                    TimelineView(.periodic(from: .now, by: 30)) { _ in
+                        Text(short(m.since[i.block])).font(.system(size: 11).monospacedDigit()).foregroundStyle(t.overlay)
+                    }
+                    // Which app it's in, once there are agents from both
+                    if m.bothApps { Text(i.herdr == true ? "herdr" : "Rex").font(.system(size: 10)).foregroundStyle(t.overlay) }
                 }
             }
             .padding(.horizontal, 10)
