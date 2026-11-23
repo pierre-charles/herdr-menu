@@ -146,6 +146,16 @@ git pull
 
 If you installed the Claude Code hooks, choose **Island › Remove Claude Code hooks** first. Then untick **Launch at login**, choose **Quit**, and delete `~/Applications/HerdrMenu.app`.
 
+## Linux (GNOME)
+
+An early GNOME Shell extension (GNOME 45 to 49, e.g. Ubuntu 24.04 and later) is in [`linux/`](linux). For now it's only the agent list: a button in the top bar showing ✋, ✓ and ✦ counts like the island, and a menu of your herdr and Rex agents, most urgent first. Click one to jump to it. There's no island, no menu actions and no permission or plan cards yet.
+
+```sh
+cp -r linux/herdr-menu@pierre-charles.dev ~/.local/share/gnome-shell/extensions/
+```
+
+Log out and back in (Wayland can't restart GNOME Shell in place), then `gnome-extensions enable herdr-menu@pierre-charles.dev`. It looks for `rex` and `herdr` on your PATH and in `~/.local/bin` and `/usr/local/bin`. `node linux/test.mjs` checks its agent logic.
+
 ## Notes
 
 - The keybinds shown are your own: the menu reads `~/.config/herdr/config.toml` each time it opens and resolves them the way herdr does (your `prefix` and `[keys]` entries win, and a default that shares a key with one of your bindings, including `[[keys.command]]` keys, is dropped). Bindings must be on one line, e.g. `new_tab = "prefix+t"` or `new_tab = ["prefix+t", "ctrl+alt+t"]`; the first one is shown.

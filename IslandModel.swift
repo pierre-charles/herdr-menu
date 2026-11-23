@@ -301,6 +301,7 @@ final class Model: ObservableObject {
 
 // Prints one JSON line with every pane's program status at start and on each change, plus the session the Rex
 // app shows (see rexVisibleScript). Run with `rex do --all`, which keeps it going while its handlers are registered.
+// The GNOME extension runs a copy of it, linux/herdr-menu@pierre-charles.dev/status.lua: change both.
 let islandStatusScript = """
 -- Prints one JSON line with every pane's program status, then again on each change.
 -- `visible` is the session the Rex app last showed, or nil until you switch sessions.

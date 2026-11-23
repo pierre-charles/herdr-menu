@@ -1,0 +1,7 @@
+{
+  "uuid": "herdr-menu@pierre-charles.dev",
+  "name": "herdr menu",
+  "description": "Your herdr and Rex agents in the top bar: what needs you, what's finished, what's working. Click one to jump to it.",
+  "shell-version": ["45", "46", "47", "48", "49"],
+  "url": "https://github.com/pierre-charles/herdr-menu"
+}
