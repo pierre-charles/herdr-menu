@@ -31,7 +31,7 @@ struct IslandView: View {
                 }
                 .frame(width: m.panelWidth)
                 .padding([.horizontal, .bottom], 8)
-                .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .top)))
+                .transition(.island)
             case .full:
                 VStack(spacing: 8) {
                     ForEach(m.requests) { RequestCard(r: $0, m: m, t: t) }
@@ -44,7 +44,7 @@ struct IslandView: View {
                 }
                 .frame(width: m.panelWidth)
                 .padding([.horizontal, .bottom], 8)
-                .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .top)))
+                .transition(.island)
             }
         }
         .fixedSize()
@@ -83,6 +83,22 @@ struct IslandView: View {
                 .contentTransition(.numericText())
         }
     }
+}
+
+// Like the Dynamic Island: the content sharpens from a blur and grows from the top once the pill has started
+// growing, and goes out faster than it came
+struct Unfocused: ViewModifier {
+    let on: Bool
+    func body(content: Content) -> some View {
+        content.blur(radius: on ? 8 : 0).opacity(on ? 0 : 1).scaleEffect(on ? 0.9 : 1, anchor: .top)
+    }
+}
+
+extension AnyTransition {
+    static let island = {
+        let blur = AnyTransition.modifier(active: Unfocused(on: true), identity: Unfocused(on: false))
+        return AnyTransition.asymmetric(insertion: blur.animation(spring.delay(0.03)), removal: blur.animation(.easeIn(duration: 0.1)))
+    }()
 }
 
 struct Card<Content: View>: View {

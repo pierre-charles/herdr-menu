@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 let ear: CGFloat = 28 // just enough for a 14pt icon or a two-digit count, so the pill covers as little menu bar as possible
-let spring = Animation.spring(response: 0.38, dampingFraction: 0.78)
+let spring = Animation.spring(duration: 0.35, bounce: 0.3) // the Dynamic Island's overshoot
 
 /// One agent: a Rex pane's program status as printed by islandStatusScript, or a herdr agent (herdr: true)
 /// with its workspace as the session
@@ -66,10 +66,9 @@ final class Model: ObservableObject {
     @Published var hoveredRow: String?
     var visible: String? { didSet { if visible != oldValue { markSeen() } } }
     @Published var geo = Geometry.current() // published, so a Height or display scaling change redraws the pill
-    var contentSize: CGSize { didSet { if contentSize != oldValue { updateWindow() } } }
+    var contentSize: CGSize // the pill's size, for hovering and clicks
     private var lastState: [String: String] = [:]
     private var peekToken = UUID()
-    private var shrink: DispatchWorkItem?
     let panel: NSPanel
 
     init(panel: NSPanel) {
@@ -268,17 +267,13 @@ final class Model: ObservableObject {
                width: contentSize.width, height: contentSize.height)
     }
 
-    /// Grow the window straight away, shrink it once the collapse animation has finished
-    func updateWindow() {
-        panel.setFrame(panel.frame.width > 0 ? panel.frame.union(pillRect) : pillRect, display: true)
-        shrink?.cancel()
-        let work = DispatchWorkItem { [self] in panel.setFrame(pillRect, display: true) }
-        shrink = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
-    }
+    /// The panel covers the whole screen and never resizes, so the pill grows down from the top: a window that
+    /// grew with it moved SwiftUI's content up from the bottom. trackMouse lets clicks through outside the pill.
+    func updateWindow() { panel.setFrame(geo.frame, display: true) }
 
     func trackMouse() {
         let inside = pillRect.insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation)
+        panel.ignoresMouseEvents = !inside
         guard inside != hovering else { return }
         withAnimation(spring) {
             hovering = inside
@@ -355,7 +350,7 @@ end)
 snapshot()
 """
 
-// A non-activating panel at the top of the notched screen; the menu shows it while the Rex app is open
+// A non-activating, see-through panel over the notched screen; the menu shows it while the Rex app is open
 final class Island {
     let panel = IslandPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     let model: Model
@@ -364,6 +359,7 @@ final class Island {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
+        panel.ignoresMouseEvents = true // until the pointer is over the pill
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         model = Model(panel: panel)
