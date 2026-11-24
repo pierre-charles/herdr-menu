@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-let ear: CGFloat = 28 // just enough for a 14pt icon or a two-digit count, so the pill covers as little menu bar as possible
+let ear: CGFloat = 20 // just enough for an 11pt icon or a two-digit count, so the pill covers as little menu bar as possible
 let spring = Animation.spring(duration: 0.35, bounce: 0.3) // the Dynamic Island's overshoot
 
 /// One agent: a Rex pane's program status as printed by islandStatusScript, or a herdr agent (herdr: true)

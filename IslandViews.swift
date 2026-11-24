@@ -71,7 +71,7 @@ struct IslandView: View {
                 Image(systemName: "circle").foregroundStyle(ears.overlay).accessibilityLabel("Idle")
             }
         }
-        .font(.system(size: 14, weight: .semibold))
+        .font(.system(size: 11, weight: .semibold))
         .transition(.scale.combined(with: .opacity))
     }
 
@@ -79,7 +79,7 @@ struct IslandView: View {
         let waiting = max(m.blocked.count, Set(m.requests.map(\.block)).count)
         let n = waiting > 0 ? waiting : !m.unseen.isEmpty ? m.unseen.count : m.working.count
         if n > 0 {
-            Text("\(n)").font(.system(size: 13, weight: .semibold)).foregroundStyle(ears.text)
+            Text("\(n)").font(.system(size: 11, weight: .semibold)).foregroundStyle(ears.text)
                 .contentTransition(.numericText())
         }
     }
