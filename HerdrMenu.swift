@@ -24,11 +24,12 @@ enum Backend: String, CaseIterable {
     var title: String { self == .rex ? "Rex" : rawValue }
     var exe: String { [.herdr: herdrCLI, .rex: rexCLI][self] ?? cmuxCLI ?? "cmux" }
     var local: Machine { Machine(id: nil, name: "Local", backend: self) }
-    var isRunning: Bool {
+    // apps: the bundle ids of the running apps, read on the main thread (see runningApps)
+    func isRunning(_ apps: Set<String>) -> Bool {
         switch self {
         case .herdr: herdrClientPID() != nil
-        case .rex: appRunning(rexBundle)
-        case .cmux: appRunning(cmuxBundle)
+        case .rex: apps.contains(rexBundle)
+        case .cmux: apps.contains(cmuxBundle)
         }
     }
     var bundle: String? {
@@ -549,7 +550,11 @@ func bringForward(_ bundle: String?) {
     NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
 }
 
-func appRunning(_ bundle: String) -> Bool { !NSRunningApplication.runningApplications(withBundleIdentifier: bundle).isEmpty }
+// NSWorkspace only keeps this list current on the main thread: read off it, an app you'd quit stayed "open"
+func runningApps() -> Set<String> {
+    dispatchPrecondition(condition: .onQueue(.main))
+    return Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+}
 
 // MARK: - Drawing
 
@@ -751,9 +756,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func refresh() {
         guard !refreshing else { return }
         refreshing = true
-        let picked = pickedBackend
+        let picked = pickedBackend, apps = runningApps()
         DispatchQueue.global().async {
-            let running = Backend.allCases.filter(\.isRunning), visible = !running.isEmpty
+            let running = Backend.allCases.filter { $0.isRunning(apps) }, visible = !running.isEmpty
             let b = driven(running, picked: picked)
             let (all, selected) = visible ? loadMachines(b) : ([b.local], nil)
             let lists = visible ? fetch(all) { $0.agents() } : []
