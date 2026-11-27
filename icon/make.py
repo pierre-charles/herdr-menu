@@ -5,7 +5,7 @@
 # Run from the repo root after changing anything here: python3 icon/make.py
 import subprocess
 
-GRADIENT = ["#38bdf8", "#1e3a8a", "#0b1030"]  # deep sea, top right to bottom left. ponytail: placeholder, not picked yet
+GRADIENT = ["#38bdf8", "#1e3a8a", "#0b1030"]  # deep sea, top right to bottom left
 SCALE = 0.85  # the fish's share of the tile, padding all round
 
 # The fish, facing right, drawn in a 1024 box around (540, 515): a chubby body whose top has the suction disc's
