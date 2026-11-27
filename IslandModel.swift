@@ -553,5 +553,5 @@ func stream(_ exe: String, _ args: [String], line: @escaping (Data) -> Void, res
         }
     }
     p.terminationHandler = { _ in DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: restart) }
-    try? p.run()
+    startWatcher(p)
 }

@@ -289,6 +289,32 @@ func run(_ args: [String], exe: String = herdrCLI, timeout: TimeInterval? = nil)
     return (p.terminationStatus == 0, data, msg)
 }
 
+// The long-running watchers (`rex do --all`, `cmux events`) don't notice this app going: they keep running,
+// and a Rex one re-runs its snapshot on every Rex event, slowing the server down for everyone. So the app
+// stops them when it quits, also on SIGTERM (pkill, build.sh; see main.swift), and at launch stops any a crash
+// or an older build left behind. Main thread only.
+var watchers: [Process] = []
+
+func startWatcher(_ p: Process) {
+    watchers.removeAll { !$0.isRunning }
+    try? p.run()
+    watchers.append(p)
+}
+
+func stopWatchers() {
+    watchers.filter(\.isRunning).forEach { $0.terminate() }
+}
+
+/// Watchers whose app has gone (their parent is launchd), recognised by this app's own scripts and arguments
+func stopOrphanedWatchers() {
+    let mine = [String(islandStatusScript.prefix(40)), String(rexVisibleScript.prefix(40)), "events --after 0 --no-ack --no-heartbeat"]
+    // Scripts span several lines, so only a command's first line has its pid and parent
+    for line in String(decoding: run(["-axo", "pid=,ppid=,command="], exe: "/bin/ps").out, as: UTF8.self).split(separator: "\n") {
+        let t = line.split(separator: " ", maxSplits: 2)
+        if t.count == 3, t[1] == "1", let pid = Int32(t[0]), mine.contains(where: t[2].contains) { kill(pid, SIGTERM) }
+    }
+}
+
 // herdr's JSON, decoded with .convertFromSnakeCase (agent_status -> agentStatus). Only the fields the menu uses.
 struct Pane: Decodable { // also an agent: agents are panes with an agent in them
     let paneId, tabId, workspaceId: String
@@ -809,7 +835,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let last = String(decoding: data, as: UTF8.self).split(separator: "\n").last else { return }
             DispatchQueue.main.async { self.rexVisible = String(last) }
         }
-        try? p.run()
+        startWatcher(p)
         rexWatcher = p
     }
 
@@ -1172,6 +1198,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         return args
     }
+
+    func applicationWillTerminate(_: Notification) { stopWatchers() }
 
     // Not NSApplication.terminate directly: macOS 26 gives that selector its own menu icon,
     // which sits beside ours and indents the whole last section.
