@@ -77,6 +77,18 @@ The menu drives whichever of **herdr** and **[Rex](https://www.superlogical.com/
 
 The icon shows while a herdr client or the Rex app is open. The badge counts the agents of the one the menu drives. It needs the `rex` CLI that comes with Rex.
 
+### cmux
+
+**[cmux](https://cmux.com)**'s agents show in [the island](#the-island), alongside herdr's and Rex's. The menu doesn't drive cmux yet, so its icon only shows while herdr or Rex is open.
+
+- **Agents** are cmux terminals whose program reports a status (OSC 7501, as Claude Code does), from `cmux events`. Each is named after its cmux workspace. Click one to switch cmux to that workspace and focus it.
+- **The ✓** stays until cmux is in front showing that workspace.
+- **Socket access:** cmux only lets processes started inside cmux use its socket by default, which shuts the island out. In cmux's Settings, set socket access to **password** (the `cmux` CLI uses the saved password, so there's nothing else to set up). Full open access works too, but cmux warns against it.
+- **cmux's own alerts** (rings, badges, notifications) still go off, so you may see things twice. Turn some off in cmux's Settings if you want; the island leaves them alone.
+- **Not yet:** the island's permission and plan cards, and what each agent is doing, don't work in cmux panes yet.
+
+It finds cmux wherever the app is installed, and uses the `cmux` CLI inside it.
+
 ### The island
 
 <p align="center">
@@ -100,7 +112,7 @@ While herdr, Rex or [cmux](https://cmux.com) is open, a black pill sits around y
 |:---:|:---:|
 | <img src="screenshots/island-plan.png" width="400" alt="A plan card: Split the API reference, with headings, bullets and Keep planning and Approve plan buttons"> | <img src="screenshots/island-light.png" width="330" alt="The expanded island in the Latte light theme with a blue Allow button"> |
 
-The agents and their states come from herdr, and from Rex (Claude Code reports them there with OSC 7501). A Rex agent's ✓ stays until you look at its session, like herdr's own done. cmux agents come from `cmux events` (the same OSC 7501 statuses), named after their workspace, and their ✓ stays until cmux is in front showing that workspace. For that, set cmux's socket access (Settings) to something other than "cmux only", which only lets processes started inside cmux connect: password mode works, since the `cmux` CLI uses the password saved in Settings. cmux has its own alerts (rings, badges, notifications), so you may want to turn some off in cmux's Settings if you see things twice. The island doesn't change them. The menu itself doesn't drive cmux yet, and the permission and plan cards don't work in cmux panes yet. For what each one is doing, and the permission and plan cards, install the Claude Code hooks with **Island › Install Claude Code hooks…**, then restart your Claude sessions. That adds three hooks to `~/.claude/settings.json` which run this app with `--hook`. If the menu isn't running, or a session isn't in a herdr or Rex pane, the hook exits straight away and Claude carries on as normal. On a screen without a notch, the island is a small pill at the top centre.
+The agents and their states come from herdr, and from Rex (Claude Code reports them there with OSC 7501). A Rex agent's ✓ stays until you look at its session, like herdr's own done. cmux's agents come from cmux, see [cmux](#cmux). For what each one is doing, and the permission and plan cards, install the Claude Code hooks with **Island › Install Claude Code hooks…**, then restart your Claude sessions. That adds three hooks to `~/.claude/settings.json` which run this app with `--hook`. If the menu isn't running, or a session isn't in a herdr or Rex pane, the hook exits straight away and Claude carries on as normal. On a screen without a notch, the island is a small pill at the top centre.
 
 ### Settings
 
