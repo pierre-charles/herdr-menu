@@ -67,7 +67,7 @@ Clicking a remote agent moves focus on that machine's server. You only see it if
 ### Rex
 
 <p align="center">
-  <img src="screenshots/rex.png" width="400" alt="The menu in Rex mode with both open: the herdr / Rex switch at the top, then agents with a checkmark on the one in the session Rex shows, Switch session, and the Session, Tab and Pane submenus named after that session">
+  <img src="screenshots/rex.png" width="400" alt="The menu in Rex mode with herdr and Rex open: the herdr / Rex switch at the top, then agents with a checkmark on the one in the session Rex shows, Switch session, and the Session, Tab and Pane submenus named after that session">
 </p>
 
 The menu drives whichever of **herdr**, **[Rex](https://www.superlogical.com/rex)** and **[cmux](#cmux)** is open. When several are, a switch at the top of the menu picks one. In Rex mode the menu works the same way, in Rex's words:
@@ -82,6 +82,10 @@ The menu drives whichever of **herdr**, **[Rex](https://www.superlogical.com/rex
 The icon shows while a herdr client, the Rex app or cmux is open. The badge counts the agents of the one the menu drives. It needs the `rex` CLI that comes with Rex.
 
 ### cmux
+
+<p align="center">
+  <img src="screenshots/cmux.png" width="400" alt="The menu in cmux mode with herdr, Rex and cmux open: the herdr / Rex / cmux switch at the top with cmux ticked, then agents with a checkmark on the one in the workspace cmux shows, Switch workspace, and the Workspace, Tab and Pane submenus">
+</p>
 
 The menu drives **[cmux](https://cmux.com)** too, and its agents show in [the island](#the-island) alongside herdr's and Rex's.
 
@@ -98,7 +102,7 @@ It finds cmux wherever the app is installed, and uses the `cmux` CLI inside it.
 ### The island
 
 <p align="center">
-  <img src="screenshots/island-collapsed.png" width="221" alt="The collapsed island around the notch: an orange hand on the left and the number 1 on the right">
+  <img src="screenshots/island-collapsed.png" width="205" alt="The collapsed island around the notch: an orange hand on the left and the number 1 on the right">
 </p>
 
 <p align="center">
