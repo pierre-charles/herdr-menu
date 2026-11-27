@@ -678,6 +678,14 @@ var pickedBackend: Backend { Backend(rawValue: setting(Setting.backend)) ?? .her
 // The one the menu drives: the picked one if it's open, else the first that is
 func driven(_ running: [Backend], picked: Backend) -> Backend { running.contains(picked) ? picked : running.first ?? picked }
 
+// An action's keybind, from my config: Rex's init.lua (`rex keymap`), else herdr's config.toml
+// (cmux's actions have no binding names, so herdr's lookup finds none)
+func keybinds(_ b: Backend) -> (String) -> (String, String) {
+    if b == .rex { return RexKeymap(json: run(["keymap", "--json"], exe: rexCLI).out).keys(for:) }
+    let config = NSHomeDirectory() + "/.config/herdr/config.toml"
+    return Keybinds(toml: (try? String(contentsOfFile: config, encoding: .utf8)) ?? "").keys(for:)
+}
+
 // MARK: - App
 
 final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -699,6 +707,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var rexVisible: String?
     var rexWatcher: Process?
     var done = DoneUntilSeen() // for Rex or cmux, whichever the menu drives
+    // What the menu shows, fetched after each refresh, so opening it never waits on a CLI (Rex's snapshot
+    // takes ~0.3s, and opening the menu again and again queued those up). Cleared after a click.
+    var menuData: (backend: Backend, machines: [Machine], snaps: [Snapshot?], keys: (String) -> (String, String), at: Date)?
+    var prefetching = false
     var island: Island?
     var target: Machine {
         let pick = setting(Setting.machines) == "one" ? picked : nil
@@ -809,8 +821,30 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     (list ?? []).map { b != .herdr && m.id == nil ? self.done.status($0) : $0.agentStatus }
                 }
                 self.show(visible: visible, statuses: statuses.compactMap { $0 })
+                if visible { self.prefetchMenu() }
             }
         }
+    }
+
+    func prefetchMenu() {
+        guard !prefetching else { return }
+        prefetching = true
+        let b = backend, shown = menuMachines().shown, rexVisible = rexVisible, done = done
+        DispatchQueue.global().async {
+            let snaps = fetch(shown) { $0.snapshot(rexVisible: rexVisible, done: done) }, keys = keybinds(b)
+            DispatchQueue.main.async {
+                self.prefetching = false
+                self.menuData = (b, shown, snaps, keys, .now)
+            }
+        }
+    }
+
+    // The machines the menu lists: every one at once, or with "One at a time" just the target, with a picker.
+    // Just after switching backend, before a refresh has listed its machines: Local only
+    func menuMachines() -> (all: [Machine], target: Machine, together: Bool, shown: [Machine]) {
+        let all = machines[0].backend == backend ? machines : [backend.local], target = all.contains(target) ? target : all[0]
+        let together = all.count == 1 || setting(Setting.machines) == "all"
+        return (all, target, together, together ? all : [target])
     }
 
     // The notch island shows while herdr, the Rex app or cmux is open and Island › Show island is on
@@ -870,22 +904,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(mi)
         }
         if running.count > 1 { menu.addItem(.separator()) }
-        // Reread my config so edits show up straight away
-        if rex {
-            let keymap = RexKeymap(json: run(["keymap", "--json"], exe: rexCLI).out)
-            keys = keymap.keys(for:)
-        } else { // cmux's actions have no binding names, so herdr's lookup finds none
-            let config = NSHomeDirectory() + "/.config/herdr/config.toml"
-            keys = Keybinds(toml: (try? String(contentsOfFile: config, encoding: .utf8)) ?? "").keys(for:)
-        }
-        // Every machine at once; a remote one that doesn't answer in time shows as unreachable.
-        // "One at a time" shows just the target machine, with a picker to switch.
-        // Just after switching backend, before a refresh has listed its machines: Local only
-        let all = machines[0].backend == b ? machines : [b.local], multi = all.count > 1, target = all.contains(target) ? target : all[0]
-        let together = !multi || setting(Setting.machines) == "all"
-        let shown = together ? all : [target]
+        // A remote machine that doesn't answer in time shows as unreachable
+        let (all, target, together, shown) = menuMachines(), multi = all.count > 1
+        // The prefetched data when it's for this backend and these machines, else fetched now
+        let cached = menuData.flatMap { $0.backend == b && $0.machines == shown && $0.at.timeIntervalSinceNow > -5 ? $0 : nil }
+        keys = cached?.keys ?? keybinds(b)
         let rexVisible = rexVisible, done = done
-        let snaps = fetch(shown) { $0.snapshot(rexVisible: rexVisible, done: done) }
+        let snaps = cached?.snaps ?? fetch(shown) { $0.snapshot(rexVisible: rexVisible, done: done) }
         let list = setting(Setting.show)
         func names(_ snap: Snapshot?) -> [String: String] {
             Dictionary(((snap?.workspaces ?? []) + (snap?.tabs ?? [])).map { ($0.tabId ?? $0.workspaceId, $0.label) }) { first, _ in first }
@@ -1120,6 +1145,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let m = command.machine
         guard let args = m.backend == .cmux ? cmuxArgs(command.args, title: sender.title) : herdrArgs(command.args, on: m) else { return }
         let r = run(m.cmd(args), exe: m.backend.exe, timeout: m.id == nil ? nil : 10)
+        menuData = nil // so a new tab or name shows the next time the menu opens
         if r.ok { bringTerminalForward(m.backend) } else { alert(r.err.isEmpty ? "\(m.backend.title) \(m.cmd(args).joined(separator: " ")) failed" : r.err) }
     }
 
