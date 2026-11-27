@@ -146,7 +146,7 @@ struct Row: View {
                         Text(short(m.since[i.block])).font(.system(size: 11).monospacedDigit()).foregroundStyle(t.overlay)
                     }
                     // Which app it's in, once there are agents from both
-                    if m.bothApps { Text(i.herdr == true ? "herdr" : "Rex").font(.system(size: 10)).foregroundStyle(t.overlay) }
+                    if m.severalApps { Text(i.source == .rex ? "Rex" : "\(i.source)").font(.system(size: 10)).foregroundStyle(t.overlay) }
                 }
             }
             .padding(.horizontal, 10)

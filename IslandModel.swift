@@ -4,13 +4,16 @@ import SwiftUI
 let ear: CGFloat = 20 // just enough for an 11pt icon or a two-digit count, so the pill covers as little menu bar as possible
 let spring = Animation.spring(duration: 0.35, bounce: 0.3) // the Dynamic Island's overshoot
 
-/// One agent: a Rex pane's program status as printed by islandStatusScript, or a herdr agent (herdr: true)
-/// with its workspace as the session
+enum Source { case herdr, rex, cmux }
+
+/// One agent: a Rex pane's program status as printed by islandStatusScript, a herdr agent with its workspace
+/// as the session, or a cmux surface's program status with its workspace as the session (CmuxState)
 struct Item: Decodable, Identifiable {
     let session, label, block, state: String
     let kind, app, msg, updated: String?
-    var herdr: Bool? = nil
+    var source = Source.rex
     var id: String { block }
+    private enum CodingKeys: CodingKey { case session, label, block, state, kind, app, msg, updated }
 
     var updatedDate: Date? { updated.flatMap { ISO8601DateFormatter().date(from: String($0.prefix(19)) + "Z") } }
 }
@@ -52,8 +55,10 @@ enum Mode: Equatable { case collapsed, peek(String), full }
 
 final class Model: ObservableObject {
     @Published var items: [Item] = []
-    // The two sources items come from: islandStatusScript for Rex, the menu's refresh for herdr
+    // Where items come from: islandStatusScript for Rex, the menu's refresh for herdr, `cmux events` for cmux
     var rexItems: [Item] = [], herdrItems: [Item] = []
+    var cmux = CmuxState()
+    var allItems: [Item] { rexItems + herdrItems + cmux.items }
     /// The herdr workspace on screen: the focused one, while the terminal running herdr is in front
     var herdrShowing: String?
     @Published var requests: [Request] = []
@@ -84,7 +89,7 @@ final class Model: ObservableObject {
     var collapsedWidth: CGFloat { geo.notch + (showEars ? 2 * ear : 0) }
     var panelWidth: CGFloat { requests.contains { $0.tool == "ExitPlanMode" } ? 540 : 440 }
     func item(_ block: String) -> Item? { items.first { $0.block == block } }
-    var bothApps: Bool { !rexItems.isEmpty && !herdrItems.isEmpty }
+    var severalApps: Bool { Set(items.map(\.source)).count > 1 }
 
     // MARK: Rex status
 
@@ -118,18 +123,49 @@ final class Model: ObservableObject {
         return items.sorted { (rank($0), $0.label) < (rank($1), $1.label) }
     }
 
-    /// Like Rex's own dot: a finished agent stays unseen until Rex is in front showing its session
+    /// Like Rex's own dot: a finished agent stays unseen until its app is in front showing its session
     func markSeen() {
-        guard rexInFront, let visible else { return }
-        let seen = items.filter { $0.session == visible }.map(\.block)
+        let seen = items.map(\.block).filter(onScreen)
         if !unseen.isDisjoint(with: seen) { withAnimation(spring) { unseen.subtract(seen) } }
     }
 
     func watch() {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: rexCLI)
         // Without --autostart=false, restarting this every 2s would start the Rex server whenever it's down
-        p.arguments = ["--autostart=false", "do", "--all", "-e", islandStatusScript]
+        stream(rexCLI, ["--autostart=false", "do", "--all", "-e", islandStatusScript]) { line in
+            guard let snap = try? JSONDecoder().decode(StatusSnapshot.self, from: line) else { return }
+            self.visible = snap.visible
+            self.rexItems = snap.items
+            self.apply(self.allItems)
+        } restart: { self.watch() }
+    }
+
+    /// cmux replays every event since it started, then keeps streaming. The replay comes in one burst, so
+    /// changes are applied 0.2s after the last one, and the island never pings for something long finished.
+    func watchCmux() {
+        guard let cmuxCLI else { return }
+        var pending = false
+        stream(cmuxCLI, ["events", "--after", "0", "--no-ack", "--no-heartbeat"]) { line in
+            guard let event = try? decoder.decode(CmuxEvent.self, from: line) else { return }
+            let showing = self.cmux.showing
+            self.cmux.apply(event)
+            if self.cmux.showing != showing { self.markSeen() }
+            guard !pending else { return }
+            pending = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { pending = false; self.apply(self.allItems) }
+        } restart: {
+            // cmux quit or restarted: its next replay starts from scratch
+            self.cmux = CmuxState()
+            self.apply(self.allItems)
+            self.watchCmux()
+        }
+    }
+
+    /// Runs a CLI that prints one JSON line per update and hands each line to `line` on the main queue.
+    /// When it ends (its server restarted, or isn't running), `restart` runs 2s later.
+    func stream(_ exe: String, _ args: [String], line: @escaping (Data) -> Void, restart: @escaping () -> Void) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: exe)
+        p.arguments = args
         p.environment = cliEnvironment
         let pipe = Pipe()
         p.standardOutput = pipe
@@ -140,19 +176,12 @@ final class Model: ObservableObject {
             if chunk.isEmpty { h.readabilityHandler = nil; return }
             buffer.append(chunk)
             while let nl = buffer.firstIndex(of: 10) {
-                let line = buffer[buffer.startIndex..<nl]
+                let l = Data(buffer[buffer.startIndex..<nl])
                 buffer.removeSubrange(buffer.startIndex...nl)
-                if let snap = try? JSONDecoder().decode(StatusSnapshot.self, from: line) {
-                    DispatchQueue.main.async {
-                        self.visible = snap.visible
-                        self.rexItems = snap.items
-                        self.apply(self.rexItems + self.herdrItems)
-                    }
-                }
+                DispatchQueue.main.async { line(l) }
             }
         }
-        // Rex server restarts end the script, so start it again
-        p.terminationHandler = { _ in DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.watch() } }
+        p.terminationHandler = { _ in DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: restart) }
         try? p.run()
     }
 
@@ -229,12 +258,16 @@ final class Model: ObservableObject {
 
     // MARK: Window
 
-    var rexInFront: Bool { NSWorkspace.shared.frontmostApplication?.bundleIdentifier == rexBundle }
+    func inFront(_ bundle: String) -> Bool { NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundle }
 
-    /// Its session is on screen, in Rex or herdr, so you can already see it
+    /// Its session is on screen, in Rex, herdr or cmux, so you can already see it
     func onScreen(_ block: String) -> Bool {
         guard let i = item(block) else { return false }
-        return i.herdr == true ? i.session == herdrShowing : visible != nil && i.session == visible && rexInFront
+        switch i.source {
+        case .herdr: return i.session == herdrShowing
+        case .rex: return visible != nil && i.session == visible && inFront(rexBundle)
+        case .cmux: return i.session == cmux.showing && inFront(cmuxBundle)
+        }
     }
 
     /// herdr's agents from the menu's refresh, nil while herdr is closed. herdr's own done already means
@@ -244,11 +277,11 @@ final class Model: ObservableObject {
         herdrShowing = terminalInFront ? snap?.workspaces.first { $0.focused == true }?.workspaceId : nil
         let new = (snap?.agents ?? []).map { a in
             Item(session: a.workspaceId, label: names[a.workspaceId] ?? displayName(a), block: a.paneId,
-                 state: a.agentStatus == "unknown" ? "idle" : a.agentStatus ?? "idle", kind: nil, app: a.agent, msg: nil, updated: nil, herdr: true)
+                 state: a.agentStatus == "unknown" ? "idle" : a.agentStatus ?? "idle", kind: nil, app: a.agent, msg: nil, updated: nil, source: .herdr)
         }
         guard new.map(\.block) != herdrItems.map(\.block) || new.map(\.state) != herdrItems.map(\.state) else { return }
         herdrItems = new
-        apply(rexItems + herdrItems)
+        apply(allItems)
     }
 
     func notify(_ block: String, sound: String?, seconds: Double) {
@@ -287,9 +320,14 @@ final class Model: ObservableObject {
     func jump(_ block: String) {
         guard let i = item(block) else { return }
         unseen.remove(block)
-        let (args, backend) = i.herdr == true ? (["agent", "focus", i.block], Backend.herdr) : (rexShow(session: i.session, block: i.block), .rex)
         DispatchQueue.global().async {
-            if run(args, exe: backend.exe).ok { DispatchQueue.main.async { bringTerminalForward(backend) } }
+            let (ok, bundle) = switch i.source {
+            case .herdr: (run(["agent", "focus", i.block]).ok, herdrTerminal())
+            case .rex: (run(rexShow(session: i.session, block: i.block), exe: rexCLI).ok, rexBundle)
+            case .cmux: (run(["select-workspace", "--workspace", i.session], exe: cmuxCLI!).ok
+                && run(["focus-panel", "--panel", i.block, "--workspace", i.session], exe: cmuxCLI!).ok, cmuxBundle)
+            }
+            if ok { DispatchQueue.main.async { bringForward(bundle) } }
         }
     }
 }
@@ -366,6 +404,7 @@ final class Island {
         panel.contentView = IslandHostingView(rootView: IslandView(m: model))
         model.updateWindow()
         model.watch()
+        model.watchCmux()
         startHookServer { [model] in model.hook($0, fd: $1) }
 
         let center = NotificationCenter.default
@@ -404,4 +443,49 @@ final class IslandPanel: NSPanel {
 // A non-activating panel never becomes key, so let the first click land
 final class IslandHostingView<V: View>: NSHostingView<V> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+// MARK: - cmux
+
+/// One line of `cmux events`, decoded with .convertFromSnakeCase. Only the fields the island uses.
+struct CmuxEvent: Decodable {
+    let name: String
+    let workspaceId, surfaceId: String?
+    let payload: Payload
+    struct Payload: Decodable {
+        let title, customTitle: String?
+        let selected: Bool?
+        let records: [Record]?
+    }
+    struct Record: Decodable { let id: String?; let kind, state: String? }
+}
+
+/// cmux's agents, built up from its events: a surface whose program reports a status (OSC 7501, as Claude Code
+/// does), named after its workspace. cmux sends a surface's whole status list each time, and none once it's cleared.
+/// ponytail: one cmux window; with several, `showing` is the workspace last selected in any of them
+struct CmuxState {
+    var titles: [String: String] = [:] // workspace -> its name
+    var statuses: [String: (workspace: String, record: CmuxEvent.Record)] = [:] // surface -> its main record
+    var showing: String? // the selected workspace
+
+    mutating func apply(_ e: CmuxEvent) {
+        let p = e.payload
+        if let ws = e.workspaceId, e.name.hasPrefix("workspace."), let title = p.customTitle ?? p.title { titles[ws] = title }
+        if e.name == "workspace.selected", p.selected == true { showing = e.workspaceId }
+        if e.name == "workspace.closed", let ws = e.workspaceId { titles[ws] = nil; statuses = statuses.filter { $0.value.workspace != ws } }
+        guard let surface = e.surfaceId else { return }
+        if e.name == "surface.closed" { statuses[surface] = nil }
+        if e.name == "program_status.changed" {
+            // The main record has no id, like Rex's
+            let main = p.records?.first { ($0.id ?? "").isEmpty }
+            statuses[surface] = main.flatMap { r in e.workspaceId.map { ($0, r) } }
+        }
+    }
+
+    var items: [Item] {
+        statuses.map { surface, s in
+            Item(session: s.workspace, label: titles[s.workspace] ?? "cmux", block: surface, state: s.record.state ?? "idle",
+                 kind: s.record.kind, app: nil, msg: nil, updated: nil, source: .cmux)
+        }
+    }
 }

@@ -10,6 +10,9 @@ let rexCLI = [NSHomeDirectory() + "/Library/Application Support/com.superlogical
     .first(where: FileManager.default.isExecutableFile) ?? "rex"
 // Rex and Rex Beta share it
 let rexBundle = "com.superlogical.rex"
+// cmux keeps its CLI in its app bundle. Only the island uses cmux so far, not the menu.
+let cmuxBundle = "com.cmuxterm.app"
+let cmuxCLI = NSWorkspace.shared.urlForApplication(withBundleIdentifier: cmuxBundle)?.appendingPathComponent("Contents/Resources/bin/cmux").path
 
 // MARK: - Backends
 
@@ -20,7 +23,7 @@ enum Backend: String, CaseIterable {
     var title: String { self == .herdr ? "herdr" : "Rex" }
     var exe: String { self == .herdr ? herdrCLI : rexCLI }
     var local: Machine { Machine(id: nil, name: "Local", backend: self) }
-    var isRunning: Bool { self == .herdr ? herdrClientPID() != nil : rexAppRunning() }
+    var isRunning: Bool { self == .herdr ? herdrClientPID() != nil : appRunning(rexBundle) }
 
     // A menu title in this backend's words
     func words(_ s: String) -> String {
@@ -490,13 +493,14 @@ func herdrTerminal() -> String? {
     return String(id)
 }
 
-func bringTerminalForward(_ backend: Backend) {
-    guard let bundle = backend == .herdr ? herdrTerminal() : rexBundle,
-          let url = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first?.bundleURL else { return }
+func bringTerminalForward(_ backend: Backend) { bringForward(backend == .herdr ? herdrTerminal() : rexBundle) }
+
+func bringForward(_ bundle: String?) {
+    guard let bundle, let url = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first?.bundleURL else { return }
     NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
 }
 
-func rexAppRunning() -> Bool { !NSRunningApplication.runningApplications(withBundleIdentifier: rexBundle).isEmpty }
+func appRunning(_ bundle: String) -> Bool { !NSRunningApplication.runningApplications(withBundleIdentifier: bundle).isEmpty }
 
 // MARK: - Drawing
 
@@ -723,9 +727,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    // The notch island shows while herdr or the Rex app is open and Island › Show island is on
+    // The notch island shows while herdr, the Rex app or cmux is open and Island › Show island is on
     func showIsland() {
-        let on = !running.isEmpty && setting(Setting.island) == "on"
+        let on = (!running.isEmpty || appRunning(cmuxBundle)) && setting(Setting.island) == "on"
         if on, island == nil { island = Island() }
         island?.show(on)
     }
@@ -1172,6 +1176,22 @@ func selfTest() -> Never {
     precondition(done.status(agent("done")) == "idle")
     done.update([]) { _ in false } // closed
     precondition(done.unseen.isEmpty)
+    // cmux: a surface's status shows under its workspace's name, until it's cleared or the surface closes
+    var cmux = CmuxState()
+    for line in [
+        #"{"name":"workspace.created","workspace_id":"w1","surface_id":null,"payload":{"title":"Terminal 1","custom_title":null,"selected":true}}"#,
+        #"{"name":"workspace.selected","workspace_id":"w1","surface_id":null,"payload":{"title":"Terminal 1","selected":true}}"#,
+        #"{"name":"program_status.changed","workspace_id":"w1","surface_id":"s1","payload":{"event":"report","records":[{"id":"","kind":"permission","state":"blocked"}]}}"#,
+        #"{"name":"program_status.changed","workspace_id":"w1","surface_id":"s2","payload":{"event":"report","records":[{"id":"","kind":"none","state":"working"}]}}"#,
+        #"{"name":"workspace.renamed","workspace_id":"w1","surface_id":null,"payload":{"title":"Terminal 1","custom_title":"api"}}"#,
+    ] { cmux.apply(try! decoder.decode(CmuxEvent.self, from: Data(line.utf8))) }
+    precondition(cmux.showing == "w1" && Set(cmux.items.map(\.label)) == ["api"])
+    precondition(cmux.items.first { $0.block == "s1" }?.state == "blocked" && cmux.items.allSatisfy { $0.source == .cmux })
+    for line in [
+        #"{"name":"program_status.changed","workspace_id":"w1","surface_id":"s1","payload":{"event":"clear","records":[]}}"#,
+        #"{"name":"surface.closed","workspace_id":"w1","surface_id":"s2","payload":{}}"#,
+    ] { cmux.apply(try! decoder.decode(CmuxEvent.self, from: Data(line.utf8))) }
+    precondition(cmux.items.isEmpty)
     print("self-test ok")
     exit(0)
 }

@@ -87,7 +87,7 @@ The icon shows while a herdr client or the Rex app is open. The badge counts the
   <img src="screenshots/island-expanded.png" width="456" alt="The island expanded: a permission card for an edit to middleware.ts with a diff and Deny, Always allow and Allow buttons, then four agents with what each is doing">
 </p>
 
-While herdr or Rex is open, a black pill sits around your MacBook's notch, a bit like the iPhone's Dynamic Island. It shows the agents of both, whichever one the menu drives:
+While herdr, Rex or [cmux](https://cmux.com) is open, a black pill sits around your MacBook's notch, a bit like the iPhone's Dynamic Island. It shows the agents of all three, whichever one the menu drives:
 
 - **The sides of the notch** show the most urgent thing: ✋ when an agent needs you, ✓ when one has finished and you haven't looked at it yet, a spinning ✦ while agents work. The number is how many. When nothing's happening, the pill hides behind the notch.
 - **Hover** to see every agent: its workspace or session, what it's doing right now ("Editing api-reference.md", "Running terraform plan") and for how long. A finished one shows your last prompt. Click one to jump to it.
@@ -100,7 +100,7 @@ While herdr or Rex is open, a black pill sits around your MacBook's notch, a bit
 |:---:|:---:|
 | <img src="screenshots/island-plan.png" width="400" alt="A plan card: Split the API reference, with headings, bullets and Keep planning and Approve plan buttons"> | <img src="screenshots/island-light.png" width="330" alt="The expanded island in the Latte light theme with a blue Allow button"> |
 
-The agents and their states come from herdr, and from Rex (Claude Code reports them there with OSC 7501). A Rex agent's ✓ stays until you look at its session, like herdr's own done. For what each one is doing, and the permission and plan cards, install the Claude Code hooks with **Island › Install Claude Code hooks…**, then restart your Claude sessions. That adds three hooks to `~/.claude/settings.json` which run this app with `--hook`. If the menu isn't running, or a session isn't in a herdr or Rex pane, the hook exits straight away and Claude carries on as normal. On a screen without a notch, the island is a small pill at the top centre.
+The agents and their states come from herdr, and from Rex (Claude Code reports them there with OSC 7501). A Rex agent's ✓ stays until you look at its session, like herdr's own done. cmux agents come from `cmux events` (the same OSC 7501 statuses), named after their workspace, and their ✓ stays until cmux is in front showing that workspace. For that, set cmux's socket access (Settings) to something other than "cmux only", which only lets processes started inside cmux connect: password mode works, since the `cmux` CLI uses the password saved in Settings. cmux has its own alerts (rings, badges, notifications), so you may want to turn some off in cmux's Settings if you see things twice. The island doesn't change them. The menu itself doesn't drive cmux yet, and the permission and plan cards don't work in cmux panes yet. For what each one is doing, and the permission and plan cards, install the Claude Code hooks with **Island › Install Claude Code hooks…**, then restart your Claude sessions. That adds three hooks to `~/.claude/settings.json` which run this app with `--hook`. If the menu isn't running, or a session isn't in a herdr or Rex pane, the hook exits straight away and Claude carries on as normal. On a screen without a notch, the island is a small pill at the top centre.
 
 ### Settings
 
