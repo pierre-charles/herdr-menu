@@ -83,7 +83,7 @@ The icon shows while a herdr client or the Rex app is open. The badge counts the
 
 - **Agents** are cmux terminals whose program reports a status (OSC 7501, as Claude Code does), from `cmux events`. Each is named after its cmux workspace. Click one to switch cmux to that workspace and focus it.
 - **The ✓** stays until cmux is in front showing that workspace.
-- **Socket access:** cmux only lets processes started inside cmux use its socket by default, which shuts the island out. In cmux's Settings, set socket access to **password** (the `cmux` CLI uses the saved password, so there's nothing else to set up). Full open access works too, but cmux warns against it.
+- **Socket access:** by default cmux only lets processes started inside cmux use its socket, which shuts the island out. In cmux's Settings → Automation, set **Socket Control Mode** to **Automation mode**, which also accepts other apps running as you. Password mode works too once you've set a socket password there. Don't use **Full open access**: it lets any local process drive your terminals.
 - **cmux's own alerts** (rings, badges, notifications) still go off, so you may see things twice. Turn some off in cmux's Settings if you want; the island leaves them alone.
 - **Not yet:** the island's permission and plan cards, and what each agent is doing, don't work in cmux panes yet.
 
