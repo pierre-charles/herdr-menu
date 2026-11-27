@@ -4,7 +4,7 @@
 
 <h1 align="center">HerdrMenu</h1>
 
-<p align="center">A Rectangle-style macOS menu bar app for <a href="https://herdr.dev">herdr</a>.</p>
+<p align="center">A Rectangle-style macOS menu bar app for <a href="https://herdr.dev">herdr</a>, <a href="https://www.superlogical.com/rex">Rex</a> and <a href="https://cmux.com">cmux</a>.</p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
@@ -66,7 +66,7 @@ Clicking a remote agent moves focus on that machine's server. You only see it if
   <img src="screenshots/rex.png" width="400" alt="The menu in Rex mode with both open: the herdr / Rex switch at the top, then agents with a checkmark on the one in the session Rex shows, Switch session, and the Session, Tab and Pane submenus named after that session">
 </p>
 
-The menu drives whichever of **herdr** and **[Rex](https://www.superlogical.com/rex)** is open. When both are, a switch at the top of the menu picks one. In Rex mode the menu bar shows Rex's mascot instead of the sheep, and the menu works the same way, in Rex's words:
+The menu drives whichever of **herdr**, **[Rex](https://www.superlogical.com/rex)** and **[cmux](#cmux)** is open. When several are, a switch at the top of the menu picks one. In Rex mode the menu bar shows Rex's mascot instead of the sheep, and the menu works the same way, in Rex's words:
 
 - **Agents** are terminals whose program reports a status to Rex (OSC 7501, as Claude Code does), with the same dots and badge. Click one to show its session in the Rex app and focus it. Rex keeps an agent done until it works again, so the menu does what herdr does: an agent is done (teal) from when it finishes until you look at its session in the Rex app, then idle. Agents that finished before the menu started count as seen.
 - **Workspaces are sessions**, tabs are tabs (Rex's windows), and panes are panes (Rex's blocks). Swap is **Move**, Rex's name for it.
@@ -75,17 +75,19 @@ The menu drives whichever of **herdr** and **[Rex](https://www.superlogical.com/
 - **The section rows name the session, tab and pane the Rex app is showing,** with a checkmark on that session and its agents, as in herdr mode. The Rex server doesn't report which session the app shows, so the menu works it out from the app resizing a session's terminals when it shows them. Until you switch sessions once after the menu starts, nothing is named.
 - Keybinds shown are the ones in your `init.lua` (`rex keymap`). The app's built-in shortcuts aren't visible to the server, so they don't show.
 
-The icon shows while a herdr client or the Rex app is open. The badge counts the agents of the one the menu drives. It needs the `rex` CLI that comes with Rex.
+The icon shows while a herdr client, the Rex app or cmux is open. The badge counts the agents of the one the menu drives. It needs the `rex` CLI that comes with Rex.
 
 ### cmux
 
-**[cmux](https://cmux.com)**'s agents show in [the island](#the-island), alongside herdr's and Rex's. The menu doesn't drive cmux yet, so its icon only shows while herdr or Rex is open.
+The menu drives **[cmux](https://cmux.com)** too, and its agents show in [the island](#the-island) alongside herdr's and Rex's. In cmux mode the menu bar shows a split-squares icon.
 
-- **Agents** are cmux terminals whose program reports a status (OSC 7501, as Claude Code does), from `cmux events`. Each is named after its cmux workspace. Click one to switch cmux to that workspace and focus it.
-- **The ✓** stays until cmux is in front showing that workspace.
+- **Agents** are cmux tabs whose program reports a status (OSC 7501, as Claude Code does), from `cmux events`, named after their workspace and tab. Click one to switch cmux to it. Like Rex's, an agent is done (teal, and ✓ in the island) from when it finishes until cmux is in front showing its workspace.
+- **Workspaces are workspaces.** cmux nests the other way round from herdr, a pane (split) holding tabs, so **Tab** is the focused tab and **Pane** the split it's in.
+- **The actions** go through the `cmux` CLI and act on whatever is focused in cmux: split right or down, resize, new, rename and close tab, and new, rename and close workspace (closing a workspace asks first). If cmux refuses one, say resizing past the edge, its message shows.
+- **Not yet:** focus and move by direction, zoom, closing a whole pane (cmux's CLI only closes tabs), and keybinds next to the actions.
 - **Socket access:** by default cmux only lets processes started inside cmux use its socket, which shuts the island out. In cmux's Settings → Automation, set **Socket Control Mode** to **Automation mode**, which also accepts other apps running as you. Password mode works too once you've set a socket password there. Don't use **Full open access**: it lets any local process drive your terminals.
 - **cmux's own alerts** (rings, badges, notifications) still go off, so you may see things twice. Turn some off in cmux's Settings if you want; the island leaves them alone.
-- **Not yet:** the island's permission and plan cards, and what each agent is doing, don't work in cmux panes yet.
+- **Not yet in the island:** permission and plan cards, and what each agent is doing, don't work in cmux panes.
 
 It finds cmux wherever the app is installed, and uses the `cmux` CLI inside it.
 
