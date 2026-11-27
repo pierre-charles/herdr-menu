@@ -22,7 +22,7 @@
 - **One-click actions** for panes (split, zoom, focus, resize, swap, close), tabs and workspaces (new, rename, close), each section in a submenu named after the focused one, plus **Switch workspace** to jump between your workspaces.
   **New tab…** and **New workspace…** ask for a name first; hold **⌥ Option** for the quick versions, which create them straight away like herdr's keybinds.
 - **herdr's keybind next to each action,** so the menu doubles as a cheat sheet.
-- **An island around your MacBook's notch** for your herdr and Rex agents: what each one is doing, a ping when one needs you, and permission and plan cards you can answer from the notch (see [the island](#the-island) below).
+- **An island around your MacBook's notch** for your herdr, Rex and cmux agents: what each one is doing, a ping when one needs you, and permission and plan cards you can answer from the notch (see [the island](#the-island) below).
 
 ### Submenus
 
