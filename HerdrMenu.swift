@@ -670,8 +670,11 @@ func setting(_ key: String) -> String {
     UserDefaults.standard.string(forKey: key) ?? Setting.defaults[key] ?? ""
 }
 
-// The one picked at the top of the menu, which only shows while both are open
+// The one picked at the top of the menu, which only shows while several are open
 var pickedBackend: Backend { Backend(rawValue: setting(Setting.backend)) ?? .herdr }
+
+// The one the menu drives: the picked one if it's open, else the first that is
+func driven(_ running: [Backend], picked: Backend) -> Backend { running.contains(picked) ? picked : running.first ?? picked }
 
 // MARK: - App
 
@@ -689,7 +692,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var refreshing = false
     // The menu drives whichever of herdr, Rex and cmux is open, or the picked one when several are
     var running: [Backend] = []
-    var backend: Backend { running.count == 1 ? running[0] : pickedBackend }
+    var backend: Backend { driven(running, picked: pickedBackend) }
     // The session the Rex app shows, from rexVisibleScript, which runs while the Rex app is open
     var rexVisible: String?
     var rexWatcher: Process?
@@ -751,7 +754,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let picked = pickedBackend
         DispatchQueue.global().async {
             let running = Backend.allCases.filter(\.isRunning), visible = !running.isEmpty
-            let b = running.count == 1 ? running[0] : picked
+            let b = driven(running, picked: picked)
             let (all, selected) = visible ? loadMachines(b) : ([b.local], nil)
             let lists = visible ? fetch(all) { $0.agents() } : []
             // The island shows herdr's local agents alongside Rex's, whichever the menu drives
@@ -829,7 +832,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let b = backend, rex = b == .rex
-        for c in Setting.backendChoices where running.count > 1 {
+        for c in Setting.backendChoices where running.count > 1 && running.map(\.rawValue).contains(c.value) {
             let mi = menuItem(c.title, icon: ["rex": "terminal", "cmux": "square.split.2x2"][c.value] ?? "rectangle.split.3x1", action: #selector(choose(_:)))
             mi.representedObject = [Setting.backend, c.value]
             mi.state = c.value == b.rawValue ? .on : .off
@@ -1221,6 +1224,7 @@ func selfTest() -> Never {
     precondition(Machine(id: "abc", name: "NUC").cmd(["agent", "list"]) == ["--machine", "abc", "agent", "list"])
     precondition(Machine.local.cmd(["agent", "list"]) == ["agent", "list"])
     precondition(Machine(id: "studio", name: "studio", backend: .rex).cmd(["ls"]) == ["-S", "studio", "ls"])
+    precondition(driven([.rex, .cmux], picked: .herdr) == .rex && driven([.rex, .cmux], picked: .cmux) == .cmux && driven([], picked: .rex) == .rex)
     precondition(Backend.rex.words("Workspaces only") == "Sessions only" && Backend.herdr.words("Machines") == "Machines")
     precondition(rexShow(session: "s1", block: "b1").suffix(2) == ["session=s1", "block=b1"])
     let hosts = try! decoder.decode(RexHosts.self, from: Data(#"{"home":{"label":""},"hosts":[{"host":{"endpoints":["https://x"],"id":"host:1","label":"MacArchy"},"from":"home","held":false}],"warnings":[]}"#.utf8))
