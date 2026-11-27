@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="logo.png" width="128" alt="herdr's sheep logo">
+  <img src="icon/remora.png" width="128" alt="Remora's icon: a smiling white remora with its suction disc, on a deep blue tile">
 </p>
 
-<h1 align="center">HerdrMenu</h1>
+<h1 align="center">Remora</h1>
 
-<p align="center">A Rectangle-style macOS menu bar app for <a href="https://herdr.dev">herdr</a>, <a href="https://www.superlogical.com/rex">Rex</a> and <a href="https://cmux.com">cmux</a>.</p>
+<p align="center">A Rectangle-style macOS menu bar app for <a href="https://herdr.dev">herdr</a>, <a href="https://www.superlogical.com/rex">Rex</a> and <a href="https://cmux.com">cmux</a>.<br>Formerly HerdrMenu.</p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
@@ -14,15 +14,19 @@
 </p>
 
 <p align="center">
-  <img src="screenshots/menu.png" width="400" alt="The HerdrMenu menu: agents with status dots, then Switch workspace and the Workspace, Tab and Pane submenus, each named after the focused one">
+  <img src="screenshots/menu.png" width="400" alt="The Remora menu: agents with status dots, then Switch workspace and the Workspace, Tab and Pane submenus, each named after the focused one">
 </p>
 
 - **Agents** at the top of the menu, with herdr's status dots. Click one to jump to it.
-- **A badge on the sheep** when an agent needs you (see [the sheep](#the-sheep) below).
+- **A badge on the remora** when an agent needs you (see [the badge](#the-badge) below).
 - **One-click actions** for panes (split, zoom, focus, resize, swap, close), tabs and workspaces (new, rename, close), each section in a submenu named after the focused one, plus **Switch workspace** to jump between your workspaces.
   **New tab…** and **New workspace…** ask for a name first; hold **⌥ Option** for the quick versions, which create them straight away like herdr's keybinds.
 - **herdr's keybind next to each action,** so the menu doubles as a cheat sheet.
 - **An island around your MacBook's notch** for your herdr, Rex and cmux agents: what each one is doing, a ping when one needs you, and permission and plan cards you can answer from the notch (see [the island](#the-island) below).
+
+### Why Remora?
+
+It started as HerdrMenu, a menu for herdr. Now it drives Rex and cmux as well, so the old name sold it short. A remora is a fish that attaches itself to a bigger one and travels with it, and that's what this app does with your terminal app: it rides along with whichever one you use, without being one itself. Remoras are harmless hitchhikers (they even keep their hosts clean), which felt right for a companion app.
 
 ### Submenus
 
@@ -34,15 +38,15 @@
 
 It calls the `herdr` CLI rather than faking keystrokes, so it acts on whichever pane you're looking at and doesn't need Accessibility permission. After a click, it brings your terminal to the front. The icon only appears while herdr is open.
 
-### The sheep
+### The badge
 
 | Icon | What it means |
 |:---:|---|
-| <img src="screenshots/badge-none.png" width="44" alt="The plain sheep icon"> | herdr is open and no agent needs you |
-| <img src="screenshots/badge-blocked.png" width="44" alt="The sheep with a red badge"> | An agent is blocked, waiting on you (for example, for an approval) |
-| <img src="screenshots/badge-done.png" width="44" alt="The sheep with a teal badge"> | An agent has finished and you haven't looked at it yet |
+| <img src="screenshots/badge-none.png" width="44" alt="The plain remora icon"> | herdr, Rex or cmux is open and no agent needs you |
+| <img src="screenshots/badge-blocked.png" width="44" alt="The remora with a red badge"> | An agent is blocked, waiting on you (for example, for an approval) |
+| <img src="screenshots/badge-done.png" width="44" alt="The remora with a teal badge"> | An agent has finished and you haven't looked at it yet |
 
-Hover over the sheep to see how many agents are blocked or done. Viewing a finished agent in herdr clears its badge.
+Hover over the remora to see how many agents are blocked or done. Viewing a finished agent in herdr clears its badge.
 
 ### Several machines
 
@@ -51,7 +55,7 @@ Hover over the sheep to see how many agents are blocked or done. Viewing a finis
   <img src="screenshots/one-at-a-time.png" width="400" alt="One at a time: a Machine section at the top picks Local or build-box">
 </p>
 
-If you've saved SSH machines with `herdr machine add`, the sheep's badge counts agents on all of them. **Machines** chooses how the menu shows them:
+If you've saved SSH machines with `herdr machine add`, the remora's badge counts agents on all of them. **Machines** chooses how the menu shows them:
 
 - **All together** (default): each enabled machine's agents under their own heading, and every machine's workspaces. The Workspace, Tab and Pane actions act on the machine the herdr TUI is showing, or Local, named in their headers.
 - **One at a time**: a **Machine** section at the top picks one machine, and the rest of the menu shows and acts on just that one.
@@ -66,7 +70,7 @@ Clicking a remote agent moves focus on that machine's server. You only see it if
   <img src="screenshots/rex.png" width="400" alt="The menu in Rex mode with both open: the herdr / Rex switch at the top, then agents with a checkmark on the one in the session Rex shows, Switch session, and the Session, Tab and Pane submenus named after that session">
 </p>
 
-The menu drives whichever of **herdr**, **[Rex](https://www.superlogical.com/rex)** and **[cmux](#cmux)** is open. When several are, a switch at the top of the menu picks one. In Rex mode the menu bar shows Rex's mascot instead of the sheep, and the menu works the same way, in Rex's words:
+The menu drives whichever of **herdr**, **[Rex](https://www.superlogical.com/rex)** and **[cmux](#cmux)** is open. When several are, a switch at the top of the menu picks one. In Rex mode the menu works the same way, in Rex's words:
 
 - **Agents** are terminals whose program reports a status to Rex (OSC 7501, as Claude Code does), with the same dots and badge. Click one to show its session in the Rex app and focus it. Rex keeps an agent done until it works again, so the menu does what herdr does: an agent is done (teal) from when it finishes until you look at its session in the Rex app, then idle. Agents that finished before the menu started count as seen.
 - **Workspaces are sessions**, tabs are tabs (Rex's windows), and panes are panes (Rex's blocks). Swap is **Move**, Rex's name for it.
@@ -79,7 +83,7 @@ The icon shows while a herdr client, the Rex app or cmux is open. The badge coun
 
 ### cmux
 
-The menu drives **[cmux](https://cmux.com)** too, and its agents show in [the island](#the-island) alongside herdr's and Rex's. In cmux mode the menu bar shows a split-squares icon.
+The menu drives **[cmux](https://cmux.com)** too, and its agents show in [the island](#the-island) alongside herdr's and Rex's.
 
 - **Agents** are cmux tabs whose program reports a status (OSC 7501, as Claude Code does), from `cmux events`, named after their workspace and tab. Click one to switch cmux to it. Like Rex's, an agent is done (teal, and ✓ in the island) from when it finishes until cmux is in front showing its workspace.
 - **Workspaces are workspaces.** cmux nests the other way round from herdr, a pane (split) holding tabs, so **Tab** is the focused tab and **Pane** the split it's in.
@@ -122,13 +126,13 @@ The agents and their states come from herdr, and from Rex (Claude Code reports t
   <img src="screenshots/settings.png" width="249" alt="The Show submenu: Agents and workspaces, Agents only, Workspaces only">
 </p>
 
-- **herdr / Rex** at the top, while both are open: which one the menu drives (`defaults write dev.pierre-charles.herdr-menu backend rex`).
+- **herdr / Rex / cmux** at the top, while more than one is open: which one the menu drives (`defaults write dev.pierre-charles.remora backend rex`).
 - **Show**: agents and workspaces (default), agents only, or workspaces only (listed in the menu itself rather than under **Switch workspace**).
 - **Actions**: turn the Workspace, Tab and Pane submenus on or off (all on by default). **Switch workspace** stays either way.
 - **Machines** (**Hosts** for Rex): all together or one at a time (only with saved SSH machines or Rex hosts).
 - **Island**: show the island, its sounds, its height (the notch's, or down to where the menu bar ends), and install or remove the Claude Code hooks.
 
-These are stored in the app's defaults, e.g. `defaults write dev.pierre-charles.herdr-menu show agents` or `defaults write dev.pierre-charles.herdr-menu actions.pane off`.
+These are stored in the app's defaults, e.g. `defaults write dev.pierre-charles.remora show agents` or `defaults write dev.pierre-charles.remora actions.pane off`.
 
 ## Requirements
 
@@ -139,13 +143,13 @@ These are stored in the app's defaults, e.g. `defaults write dev.pierre-charles.
 ## Install
 
 ```sh
-git clone https://github.com/pierre-charles/herdr-menu.git
-cd herdr-menu
+git clone https://github.com/pierre-charles/remora.git
+cd remora
 ./build.sh
-open ~/Applications/HerdrMenu.app
+open ~/Applications/Remora.app
 ```
 
-`build.sh` builds and signs the app into `~/Applications`. Then open herdr, click the sheep in the menu bar and tick **Launch at login** so it starts every time you log in. It's listed in System Settings → General → Login Items.
+`build.sh` builds and signs the app into `~/Applications`. Then open herdr, Rex or cmux, click the remora in the menu bar and tick **Launch at login** so it starts every time you log in. It's listed in System Settings → General → Login Items.
 
 ## Update
 
@@ -154,21 +158,21 @@ git pull
 ./build.sh
 ```
 
-`build.sh` restarts the app if it's running, so the new version takes over straight away.
+`build.sh` restarts the app if it's running, so the new version takes over straight away. Coming from HerdrMenu? The same two commands work (GitHub forwards the old repo address). `build.sh` removes `HerdrMenu.app`, and on its first launch Remora copies HerdrMenu's settings, points the Claude Code hooks at itself, and asks whether to open at login. Restart your Claude sessions so they pick up the new hook path.
 
 ## Uninstall
 
-If you installed the Claude Code hooks, choose **Island › Remove Claude Code hooks** first. Then untick **Launch at login**, choose **Quit**, and delete `~/Applications/HerdrMenu.app`.
+If you installed the Claude Code hooks, choose **Island › Remove Claude Code hooks** first. Then untick **Launch at login**, choose **Quit**, and delete `~/Applications/Remora.app`.
 
 ## Notes
 
 - The keybinds shown are your own: the menu reads `~/.config/herdr/config.toml` each time it opens and resolves them the way herdr does (your `prefix` and `[keys]` entries win, and a default that shares a key with one of your bindings, including `[[keys.command]]` keys, is dropped). Bindings must be on one line, e.g. `new_tab = "prefix+t"` or `new_tab = ["prefix+t", "ctrl+alt+t"]`; the first one is shown.
 - The screenshots show made-up workspaces and agents, from fake `herdr` and `rex` CLIs fed to a throwaway copy of the app, so no real names reach the repo.
 - Status colours are herdr's Catppuccin palette, its default theme.
-- The app icon is herdr's logo (`logo.png`), and the menu bar icon is the same logo converted to a template image (`sheep.png`). Rex's mascot isn't in the repo: the app makes it from the image in your installed Rex app.
+- The icons are drawn by `icon/make.py` as SVG and rendered to `icon/remora.png` (the app icon), `icon/menubar.png` (the menu bar's template image) and the badge screenshots. Run `python3 icon/make.py` after changing it.
 
 ## Licence
 
-HerdrMenu's code is released under the [MIT License](LICENSE).
+Remora's code is released under the [MIT License](LICENSE).
 
-HerdrMenu is an unofficial companion app and isn't affiliated with herdr. The sheep logo comes from [herdrdev/herdr](https://github.com/herdrdev/herdr) (`assets/logo.svg`), and `logo.png` and `sheep.png` stay under herdr's [Apache License 2.0](LICENSE-APACHE). It's used as the app icon and converted to a monochrome menu bar icon.
+Remora is an unofficial companion app and isn't affiliated with herdr, Rex or cmux.

@@ -22,7 +22,7 @@ struct IslandView: View {
             case .collapsed:
                 EmptyView()
             case .peek(let block):
-                SwiftUI.Group { // HerdrMenu.swift has its own Group
+                SwiftUI.Group { // Remora.swift has its own Group
                     if let r = m.requests.first(where: { $0.block == block }) {
                         RequestCard(r: r, m: m, t: t)
                     } else if let i = m.item(block) {
@@ -57,7 +57,7 @@ struct IslandView: View {
     }
 
     @ViewBuilder var leftEar: some View {
-        SwiftUI.Group { // HerdrMenu.swift has its own Group
+        SwiftUI.Group { // Remora.swift has its own Group
             if !m.blocked.isEmpty || !m.requests.isEmpty {
                 Image(systemName: "hand.raised.fill").foregroundStyle(ears.peach).accessibilityLabel("Needs you")
                     .symbolEffect(.wiggle, options: .repeat(.periodic(delay: 1.2)), isActive: true)

@@ -558,35 +558,6 @@ func runningApps() -> Set<String> {
 
 // MARK: - Drawing
 
-// Rex's mascot for the menu bar, made one colour like the sheep from the "Rexie" image in the installed Rex app,
-// so none of Rex's artwork ships in this repo. Keeps its shape minus the dark eye and mouth, trimmed to the shape.
-// ponytail: tied to the image's name and colours in Rex's assets; nil (the caller falls back) if Rex changes them.
-func rexMascot() -> NSImage? {
-    let n = 72
-    guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: rexBundle),
-          let source = Bundle(url: url)?.image(forResource: "Rexie"),
-          let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: n, pixelsHigh: n, bitsPerSample: 8, samplesPerPixel: 4,
-                                     hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: n * 4, bitsPerPixel: 32),
-          let p = rep.bitmapData else { return nil }
-    NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-    source.draw(in: NSRect(x: 0, y: 0, width: n, height: n))
-    NSGraphicsContext.restoreGraphicsState()
-    var box = CGRect.null
-    for y in 0..<n {
-        for x in 0..<n {
-            let i = (y * n + x) * 4, a = Int(p[i + 3])
-            // Premultiplied, so green against alpha: the body has plenty, the eye and mouth hardly any.
-            // Low alpha is the soft glow behind the head.
-            let keep = a > 90 && Int(p[i + 1]) * 255 > 60 * a
-            (p[i], p[i + 1], p[i + 2], p[i + 3]) = (0, 0, 0, keep ? UInt8(a) : 0)
-            if keep { box = box.union(CGRect(x: x, y: y, width: 1, height: 1)) }
-        }
-    }
-    guard let cropped = rep.cgImage?.cropping(to: box) else { return nil }
-    return NSImage(cgImage: cropped, size: .zero)
-}
-
 // Icon, title, then keybind right-aligned in grey, like Rectangle.
 // The icon lives inside the title text: macOS hides NSMenuItem.image for this app, bundled or not.
 func label(_ title: String, icon: String, keys: (String, String) = ("", ""), tint: NSColor? = nil) -> NSAttributedString {
@@ -653,7 +624,7 @@ func rank(_ status: String?) -> Int {
 
 // MARK: - Settings
 
-// Menu choices, stored in UserDefaults (`defaults write dev.pierre-charles.herdr-menu show agents` works too).
+// Menu choices, stored in UserDefaults (`defaults write dev.pierre-charles.remora show agents` works too).
 // The first choice is the default.
 enum Setting {
     static let backend = "backend", show = "show", machines = "machines"
@@ -684,8 +655,8 @@ func driven(_ running: [Backend], picked: Backend) -> Backend { running.contains
 // MARK: - App
 
 final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    var icons: [Backend: (plain: NSImage, notched: NSImage)] = [:]
+    let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength) // as wide as the fish
+    var icon = (plain: NSImage(), notched: NSImage()) // the remora, plain and with the badge's notch
     let dot = NSView()
     var keys: (String) -> (String, String) = { _ in ("", "") } // an action's keybind
 
@@ -708,19 +679,17 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return [pick, tuiSelected].compactMap { $0 }.first(where: machines.contains) ?? machines[0]
     }
 
-    // The status badge: a 7pt dot in an 11pt notch cut from the icon's bottom-right corner.
-    // The icon stays a template image (macOS tints it for light/dark); only the dot is coloured.
-    let iconSize: CGFloat = 18, dotSize: CGFloat = 7, notchSize: CGFloat = 11
+    // The status badge: a 7pt dot in an 11pt notch cut from the icon's bottom-left corner, over the tail,
+    // so the fish's face stays whole. The icon stays a template image (macOS tints it for light/dark); only
+    // the dot is coloured. 26pt wide makes the fish 15pt tall, as tall as other menu bar icons.
+    let iconSize: CGFloat = 26, dotSize: CGFloat = 7, notchSize: CGFloat = 11
 
     func applicationDidFinishLaunching(_: Notification) {
-        icons = [
-            .herdr: menuBarIcons(Bundle.main.image(forResource: "sheep")
-                ?? NSImage(systemSymbolName: "rectangle.split.3x1", accessibilityDescription: "herdr")!),
-            .rex: menuBarIcons(rexMascot() ?? NSImage(systemSymbolName: "terminal", accessibilityDescription: "Rex")!),
-            .cmux: menuBarIcons(NSImage(systemSymbolName: "square.split.2x2", accessibilityDescription: "cmux")!),
-        ]
+        // The same remora whichever of herdr, Rex and cmux the menu drives: they have their own icons
+        icon = menuBarIcons(Bundle.main.image(forResource: "menubar")
+            ?? NSImage(systemSymbolName: "fish", accessibilityDescription: "Remora")!)
         CmuxEvents.shared.watch()
-        status.button?.image = icons[backend]?.plain
+        status.button?.image = icon.plain
         dot.wantsLayer = true
         dot.layer?.cornerRadius = dotSize / 2
         status.button?.addSubview(dot)
@@ -730,6 +699,38 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         refresh()
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refresh() }
+        DispatchQueue.main.async { self.migrateFromHerdrMenu() }
+    }
+
+    // MARK: HerdrMenu → Remora
+
+    /// The first launch after the rename (v0.5.0): copy HerdrMenu's settings, point the Claude Code hooks at this
+    /// app, and say so in a dialog that shows the new icon. Only for people who had HerdrMenu. The login item can't
+    /// be read from another app, so the dialog asks, ticked.
+    func migrateFromHerdrMenu() {
+        let d = UserDefaults.standard
+        guard d.string(forKey: "renamedFrom") == nil,
+              let old = d.persistentDomain(forName: "dev.pierre-charles.herdr-menu"), !old.isEmpty else { return }
+        for (key, value) in old where d.object(forKey: key) == nil { d.set(value, forKey: key) }
+        d.set("HerdrMenu", forKey: "renamedFrom")
+        let hooks = ((try? String(contentsOfFile: claudeSettings, encoding: .utf8)) ?? "").contains("/HerdrMenu' --hook")
+        if hooks, let error = setClaudeHooks(installed: true) { alert(error) }
+
+        let a = NSAlert()
+        a.messageText = "HerdrMenu is now Remora"
+        a.informativeText = "A remora is a fish that hitches a ride on bigger ones, and this app rides along with your terminal, "
+            + "whether that's herdr, Rex or cmux. Your settings " + (hooks ? "and Claude Code hooks came" : "came") + " with you."
+        a.addButton(withTitle: "OK")
+        a.addButton(withTitle: "What's New")
+        a.showsSuppressionButton = true // used as the login checkbox
+        a.suppressionButton?.title = "Open Remora at login"
+        a.suppressionButton?.state = .on
+        NSApp.activate()
+        let answer = a.runModal()
+        if a.suppressionButton?.state == .on, SMAppService.mainApp.status != .enabled { try? SMAppService.mainApp.register() }
+        if answer == .alertSecondButtonReturn {
+            NSWorkspace.shared.open(URL(string: "https://github.com/pierre-charles/remora/releases/tag/v0.5.0")!)
+        }
     }
 
     // The icon as a template (macOS tints it for light/dark), plain and with the badge's notch.
@@ -737,9 +738,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuBarIcons(_ icon: NSImage) -> (plain: NSImage, notched: NSImage) {
         icon.size = NSSize(width: iconSize, height: iconSize * icon.size.height / icon.size.width)
         icon.isTemplate = true
-        let notched = NSImage(size: icon.size, flipped: false) { [iconSize, dotSize, notchSize] r in
+        let notched = NSImage(size: icon.size, flipped: false) { [dotSize, notchSize] r in
             icon.draw(in: r)
-            let c = iconSize - dotSize / 2
+            let c = dotSize / 2
             NSGraphicsContext.current?.compositingOperation = .destinationOut
             NSBezierPath(ovalIn: NSRect(x: c - notchSize / 2, y: dotSize / 2 - notchSize / 2, width: notchSize, height: notchSize)).fill()
             return true
@@ -748,8 +749,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return (icon, notched)
     }
 
-    // Always running (a login item); the icon only shows while a herdr client or the Rex app is open,
-    // as the sheep or Rex's mascot for the one the menu drives.
+    // Always running (a login item); the icon only shows while a herdr client, the Rex app or cmux is open.
     // A red dot means an agent is blocked on me, teal means one finished and I haven't looked yet,
     // counting the backend the menu drives.
     // Polls off the main thread, since remote machines answer over SSH.
@@ -818,15 +818,15 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard visible, let button = status.button else { return }
         let blocked = statuses.filter { $0 == "blocked" }.count, done = statuses.filter { $0 == "done" }.count
         let color = blocked > 0 ? style("blocked").color : done > 0 ? style("done").color : nil
-        guard let (icon, notched) = icons[backend] else { return }
+        let (icon, notched) = icon
         button.image = color == nil ? icon : notched
         dot.isHidden = color == nil
         // A CGColor is fixed when read, so resolve it for the menu bar's look (it can be dark in light mode)
         button.effectiveAppearance.performAsCurrentDrawingAppearance { self.dot.layer?.backgroundColor = color?.cgColor }
-        // Same spot as the notch: the icon's bottom-right corner, wherever the button centres it
+        // Same spot as the notch: the icon's bottom-left corner, wherever the button centres it
         let w = icon.size.width, h = icon.size.height
         let x0 = (button.bounds.width - w) / 2, y0 = (button.bounds.height - h) / 2
-        dot.frame = NSRect(x: x0 + w - dotSize, y: button.isFlipped ? y0 + h - dotSize : y0,
+        dot.frame = NSRect(x: x0, y: button.isFlipped ? y0 + h - dotSize : y0,
                            width: dotSize, height: dotSize)
         let counts = [(blocked, "blocked"), (done, "done")].filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }
         button.toolTip = counts.isEmpty ? backend.title : "Agents: " + counts.joined(separator: ", ")
@@ -1214,7 +1214,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 }
 
-// `HerdrMenu --self-test` (see main.swift)
+// `Remora --self-test` (see main.swift)
 func selfTest() -> Never {
     precondition(isHerdrClient("herdr"))
     precondition(isHerdrClient("/Users/me/.local/bin/herdr --session work"))

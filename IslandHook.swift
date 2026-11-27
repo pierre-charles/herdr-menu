@@ -1,8 +1,8 @@
 import Foundation
 
-// Claude Code runs `HerdrMenu --hook`, which forwards the hook input to the running app over this socket.
+// Claude Code runs `Remora --hook`, which forwards the hook input to the running app over this socket.
 // For PermissionRequest it waits for the app's reply and prints it as the hook's output.
-let socketPath = NSHomeDirectory() + "/Library/Application Support/herdr-menu/hook.sock"
+let socketPath = NSHomeDirectory() + "/Library/Application Support/remora/hook.sock"
 
 private func withAddress<T>(_ body: (UnsafePointer<sockaddr>, socklen_t) -> T) -> T {
     var addr = sockaddr_un()
@@ -86,8 +86,8 @@ func claudeHooksInstalled() -> Bool {
     ((try? String(contentsOfFile: claudeSettings, encoding: .utf8)) ?? "").contains(hookCommand.dropFirst())
 }
 
-// Python rather than JSONSerialization so settings.json keeps its key order. Removes this app's hooks and the
-// standalone Rex Island's from before the island moved into the menu, then adds them back unless removing.
+// Python rather than JSONSerialization so settings.json keeps its key order. Removes this app's hooks, HerdrMenu's
+// (its old name) and the standalone Rex Island's from before the island moved into the menu, then adds them back unless removing.
 // PreToolUse and UserPromptSubmit are async so Claude never waits; PermissionRequest waits for a click.
 let hooksScript = """
 import json, os, sys
@@ -95,7 +95,7 @@ command, mode = sys.argv[1], sys.argv[2]
 path = os.path.expanduser("~/.claude/settings.json")
 settings = json.load(open(path)) if os.path.exists(path) else {}
 hooks = settings.setdefault("hooks", {})
-ours = lambda h: "--hook" in h.get("command", "") and ("HerdrMenu" in h["command"] or "RexIsland" in h["command"])
+ours = lambda h: "--hook" in h.get("command", "") and any(app in h["command"] for app in ("Remora", "HerdrMenu", "RexIsland"))
 for event in list(hooks):
     hooks[event] = [g for g in hooks[event] if not any(ours(h) for h in g.get("hooks", []))]
     if not hooks[event]:
