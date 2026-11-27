@@ -57,7 +57,9 @@ final class Model: ObservableObject {
     @Published var items: [Item] = []
     // Where items come from: islandStatusScript for Rex, the menu's refresh for herdr, `cmux events` for cmux
     var rexItems: [Item] = [], herdrItems: [Item] = []
-    var cmux = CmuxState()
+    var cmux: CmuxState { CmuxEvents.shared.state }
+    private var cmuxShowing: String?
+    private var cmuxPending = false
     var allItems: [Item] { rexItems + herdrItems + cmux.items }
     /// The herdr workspace on screen: the focused one, while the terminal running herdr is in front
     var herdrShowing: String?
@@ -139,50 +141,13 @@ final class Model: ObservableObject {
         } restart: { self.watch() }
     }
 
-    /// cmux replays every event since it started, then keeps streaming. The replay comes in one burst, so
-    /// changes are applied 0.2s after the last one, and the island never pings for something long finished.
-    func watchCmux() {
-        guard let cmuxCLI else { return }
-        var pending = false
-        stream(cmuxCLI, ["events", "--after", "0", "--no-ack", "--no-heartbeat"]) { line in
-            guard let event = try? decoder.decode(CmuxEvent.self, from: line) else { return }
-            let showing = self.cmux.showing
-            self.cmux.apply(event)
-            if self.cmux.showing != showing { self.markSeen() }
-            guard !pending else { return }
-            pending = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { pending = false; self.apply(self.allItems) }
-        } restart: {
-            // cmux quit or restarted: its next replay starts from scratch
-            self.cmux = CmuxState()
-            self.apply(self.allItems)
-            self.watchCmux()
-        }
-    }
-
-    /// Runs a CLI that prints one JSON line per update and hands each line to `line` on the main queue.
-    /// When it ends (its server restarted, or isn't running), `restart` runs 2s later.
-    func stream(_ exe: String, _ args: [String], line: @escaping (Data) -> Void, restart: @escaping () -> Void) {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: exe)
-        p.arguments = args
-        p.environment = cliEnvironment
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = FileHandle.nullDevice
-        var buffer = Data()
-        pipe.fileHandleForReading.readabilityHandler = { h in
-            let chunk = h.availableData
-            if chunk.isEmpty { h.readabilityHandler = nil; return }
-            buffer.append(chunk)
-            while let nl = buffer.firstIndex(of: 10) {
-                let l = Data(buffer[buffer.startIndex..<nl])
-                buffer.removeSubrange(buffer.startIndex...nl)
-                DispatchQueue.main.async { line(l) }
-            }
-        }
-        p.terminationHandler = { _ in DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: restart) }
-        try? p.run()
+    /// cmux's events replay in one burst when the watcher starts, so changes are applied 0.2s after the
+    /// last one, and the island never pings for something long finished
+    func cmuxChanged() {
+        if cmux.showing != cmuxShowing { cmuxShowing = cmux.showing; markSeen() }
+        guard !cmuxPending else { return }
+        cmuxPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.cmuxPending = false; self.apply(self.allItems) }
     }
 
     // MARK: Claude hooks
@@ -404,7 +369,7 @@ final class Island {
         panel.contentView = IslandHostingView(rootView: IslandView(m: model))
         model.updateWindow()
         model.watch()
-        model.watchCmux()
+        CmuxEvents.shared.onChange = { [model] in model.cmuxChanged() }
         startHookServer { [model] in model.hook($0, fd: $1) }
 
         let center = NotificationCenter.default
@@ -488,4 +453,105 @@ struct CmuxState {
                  kind: s.record.kind, app: nil, msg: nil, updated: nil, source: .cmux)
         }
     }
+}
+
+/// `cmux events`, followed for the island and the menu from launch. It replays everything since cmux started,
+/// then keeps streaming; if cmux quits, it starts again from scratch. The menu reads `state` off the main thread.
+final class CmuxEvents {
+    static let shared = CmuxEvents()
+    private var _state = CmuxState()
+    private let lock = NSLock()
+    var state: CmuxState { lock.withLock { _state } }
+    var onChange: (() -> Void)? // the island
+
+    func watch() {
+        guard let cmuxCLI else { return }
+        stream(cmuxCLI, ["events", "--after", "0", "--no-ack", "--no-heartbeat"]) { [self] line in
+            guard let event = try? decoder.decode(CmuxEvent.self, from: line) else { return }
+            lock.withLock { _state.apply(event) }
+            onChange?()
+        } restart: { [self] in
+            lock.withLock { _state = CmuxState() }
+            onChange?()
+            watch()
+        }
+    }
+}
+
+/// `cmux tree --all --json --id-format uuids`, decoded with .convertFromSnakeCase. Only the fields the menu uses.
+struct CmuxTree: Decodable {
+    struct Window: Decodable { let active: Bool?; let workspaces: [Workspace] }
+    struct Workspace: Decodable { let id, title: String; let selected: Bool?; let panes: [Pane] }
+    struct Pane: Decodable { let id: String; let focused: Bool?; let surfaces: [Surface] }
+    struct Surface: Decodable { let id, title: String; let focused: Bool? }
+    let windows: [Window]
+
+    static func load() -> CmuxTree? {
+        try? decoder.decode(CmuxTree.self, from: run(["tree", "--all", "--json", "--id-format", "uuids"], exe: Backend.cmux.exe).out)
+    }
+}
+
+/// herdr's snapshot model from cmux's tree and event statuses: workspaces as workspaces, and each tab (surface) as
+/// both a tab and a pane, with its status if its program reports one. Focused is the active window's selection.
+/// `done` reports what you've seen as idle, like the Rex script's `unseen`.
+func cmuxSnapshot(_ tree: CmuxTree, _ state: CmuxState, done: DoneUntilSeen?) -> Snapshot {
+    var workspaces: [Group] = [], tabs: [Group] = [], panes: [Pane] = []
+    for win in tree.windows {
+        for w in win.workspaces {
+            let shown = win.active == true && w.selected == true
+            var count = 0, urgent: String?
+            for p in w.panes {
+                for s in p.surfaces {
+                    var status = state.statuses[s.id]?.record.state
+                    if let done, status == "done", !done.unseen.contains(s.id) { status = "idle" }
+                    let focused = shown && p.focused == true && s.focused == true
+                    let pane = Pane(paneId: s.id, tabId: s.id, workspaceId: w.id, agent: status == nil ? nil : "agent",
+                                    agentStatus: status, terminalTitleStripped: s.title, cwd: nil, focused: focused)
+                    panes.append(pane)
+                    tabs.append(Group(workspaceId: w.id, tabId: s.id, label: s.title, agentStatus: status, focused: focused, paneCount: 1))
+                    count += 1
+                    if rank(status) < rank(urgent) { urgent = status }
+                }
+            }
+            workspaces.append(Group(workspaceId: w.id, tabId: nil, label: w.title, agentStatus: urgent, focused: shown, paneCount: count))
+        }
+    }
+    return Snapshot(workspaces: workspaces, tabs: tabs, agents: panes.filter { $0.agent != nil }, panes: panes)
+}
+
+func cmuxSnapshot(done: DoneUntilSeen?) -> Snapshot? {
+    CmuxTree.load().map { cmuxSnapshot($0, CmuxEvents.shared.state, done: done) }
+}
+
+/// The focused workspace, pane and tab in cmux's active window, for the menu's actions
+func cmuxFocused() -> (workspace: String, workspaceName: String, pane: String, tabName: String)? {
+    guard let win = CmuxTree.load()?.windows.first(where: { $0.active == true }),
+          let w = win.workspaces.first(where: { $0.selected == true }),
+          let p = w.panes.first(where: { $0.focused == true }) else { return nil }
+    return (w.id, w.title, p.id, p.surfaces.first { $0.focused == true }?.title ?? "")
+}
+
+/// Runs a CLI that prints one JSON line per update and hands each line to `line` on the main queue.
+/// When it ends (its server restarted, or isn't running), `restart` runs 2s later.
+func stream(_ exe: String, _ args: [String], line: @escaping (Data) -> Void, restart: @escaping () -> Void) {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: exe)
+    p.arguments = args
+    p.environment = cliEnvironment
+    let pipe = Pipe()
+    p.standardOutput = pipe
+    p.standardError = FileHandle.nullDevice
+    var buffer = Data()
+    pipe.fileHandleForReading.readabilityHandler = { h in
+        let chunk = h.availableData
+        if chunk.isEmpty { h.readabilityHandler = nil; return }
+        buffer.append(chunk)
+        while let nl = buffer.firstIndex(of: 10) {
+            let l = Data(buffer[buffer.startIndex..<nl])
+            buffer.removeSubrange(buffer.startIndex...nl)
+            DispatchQueue.main.async { line(l) }
+        }
+    }
+    p.terminationHandler = { _ in DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: restart) }
+    try? p.run()
 }

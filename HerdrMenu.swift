@@ -10,20 +10,34 @@ let rexCLI = [NSHomeDirectory() + "/Library/Application Support/com.superlogical
     .first(where: FileManager.default.isExecutableFile) ?? "rex"
 // Rex and Rex Beta share it
 let rexBundle = "com.superlogical.rex"
-// cmux keeps its CLI in its app bundle. Only the island uses cmux so far, not the menu.
+// cmux keeps its CLI in its app bundle
 let cmuxBundle = "com.cmuxterm.app"
 let cmuxCLI = NSWorkspace.shared.urlForApplication(withBundleIdentifier: cmuxBundle)?.appendingPathComponent("Contents/Resources/bin/cmux").path
 
 // MARK: - Backends
 
-// The multiplexer the menu drives: whichever is open, or the one picked at the top of the menu when both are.
+// The multiplexer the menu drives: whichever is open, or the one picked at the top of the menu when several are.
 // Rex calls herdr's workspaces sessions, its tabs windows (the app shows them as tabs), its panes blocks and its machines hosts.
+// cmux nests the other way round: a workspace's panes are its splits, and each pane holds tabs (surfaces).
 enum Backend: String, CaseIterable {
-    case herdr, rex
-    var title: String { self == .herdr ? "herdr" : "Rex" }
-    var exe: String { self == .herdr ? herdrCLI : rexCLI }
+    case herdr, rex, cmux
+    var title: String { self == .rex ? "Rex" : rawValue }
+    var exe: String { [.herdr: herdrCLI, .rex: rexCLI][self] ?? cmuxCLI ?? "cmux" }
     var local: Machine { Machine(id: nil, name: "Local", backend: self) }
-    var isRunning: Bool { self == .herdr ? herdrClientPID() != nil : appRunning(rexBundle) }
+    var isRunning: Bool {
+        switch self {
+        case .herdr: herdrClientPID() != nil
+        case .rex: appRunning(rexBundle)
+        case .cmux: appRunning(cmuxBundle)
+        }
+    }
+    var bundle: String? {
+        switch self {
+        case .herdr: herdrTerminal()
+        case .rex: rexBundle
+        case .cmux: cmuxBundle
+        }
+    }
 
     // A menu title in this backend's words
     func words(_ s: String) -> String {
@@ -99,6 +113,39 @@ let rexSessionActions: [Action] = [
     ("Rename session", "square.and.pencil", "session.rename", rexDo("session.rename")),
     ("Close session", "rectangle.badge.xmark", "session.close", rexDo("session.close")),
 ]
+
+// cmux: its CLI acts on the focused workspace and tab when given none, like Rex's actions. {pane} and {workspace}
+// are the focused ones, from `cmux tree`, for the commands that need them. Tabs are a pane's surfaces, so Close tab
+// closes the focused one (the pane goes with its last tab); cmux's CLI can't close a whole pane.
+// ponytail: no keybinds shown, and no directional focus, swap or zoom yet
+let cmuxPaneActions: [Action] = [
+    ("Split right", "rectangle.split.2x1", "", ["new-split", "right", "--focus", "true"]),
+    ("Split down", "rectangle.split.1x2", "", ["new-split", "down", "--focus", "true"]),
+]
+let cmuxPaneSubmenus: [Submenu] = [
+    ("Resize", "arrow.up.and.down.and.arrow.left.and.right", directionRows(resizeIcons) { dir in
+        ("", ["resize-pane", "--pane", "{pane}", "-" + dir.prefix(1).uppercased()])
+    }),
+]
+let cmuxTabActions: [Action] = [
+    ("New tab", "plus.rectangle.on.rectangle", "", ["new-surface", "--focus", "true"]),
+    ("Rename tab…", "pencil", "", ["tab-action", "--action", "rename", "--title", "{label}"]),
+    ("Close tab", "xmark.rectangle", "", ["close-surface"]),
+]
+let cmuxWorkspaceActions: [Action] = [
+    ("New workspace…", "macwindow.badge.plus", "", ["new-workspace", "--name", "{label}", "--focus", "true"]),
+    ("Rename workspace…", "square.and.pencil", "", ["workspace-action", "--action", "rename", "--title", "{label}"]),
+    ("Close workspace", "rectangle.badge.xmark", "", ["close-workspace", "--workspace", "{workspace}"]),
+]
+
+// Each backend's pane actions, pane submenus, close pane (none for cmux), tab and workspace actions
+func actions(_ b: Backend) -> (pane: [Action], paneMenus: [Submenu], close: Action?, tab: [Action], workspace: [Action]) {
+    switch b {
+    case .herdr: (paneActions, paneSubmenus, closePane, tabActions, workspaceActions)
+    case .rex: (rexPaneActions, rexPaneSubmenus, rexClosePane, rexTabActions, rexSessionActions)
+    case .cmux: (cmuxPaneActions, cmuxPaneSubmenus, nil, cmuxTabActions, cmuxWorkspaceActions)
+    }
+}
 
 // MARK: - Keybinds
 
@@ -220,8 +267,8 @@ struct RexKeymap {
 
 // Drop herdr's caller context (HERDR_PANE_ID etc.) in case this app was launched from a herdr pane:
 // the CLI would treat that pane as the caller, so "current pane" and splits would ignore what's focused.
-// Rex's (REX_SESSION, REX_BLOCK) likewise.
-let cliEnvironment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("HERDR_") && !$0.key.hasPrefix("REX_") }
+// Rex's (REX_SESSION, REX_BLOCK) and cmux's (CMUX_WORKSPACE_ID, CMUX_SURFACE_ID…) likewise.
+let cliEnvironment = ProcessInfo.processInfo.environment.filter { k, _ in !["HERDR_", "REX_", "CMUX_"].contains { k.hasPrefix($0) } }
 
 // timeout: kill the call after this many seconds, for remote machines whose SSH link may hang
 func run(_ args: [String], exe: String = herdrCLI, timeout: TimeInterval? = nil) -> (ok: Bool, out: Data, err: String) {
@@ -282,7 +329,7 @@ func herdrResult(_ args: [String], timeout: TimeInterval? = nil) -> Result? {
 // windows as tabs, blocks as panes, and a terminal whose program reports a status (OSC 7501, as Claude Code
 // does) as an agent, with its most urgent record. `visible=<session>` (from rexVisibleScript) marks that session,
 // its active window and that window's focused block as focused, like herdr's snapshot; without it nothing is.
-// `unseen=<blocks>` (from RexDone) keeps only those agents done and reports the others' done as idle, dots included.
+// `unseen=<blocks>` (from DoneUntilSeen) keeps only those agents done and reports the others' done as idle, dots included.
 // Viewing a session needs attaching to it first. `rex do` prints the returned text as a JSON string.
 // ponytail: an empty Lua table encodes as {}, so ":{}" becomes ":[]", which a label containing ":{} would hit too.
 let rexSnapshotScript = """
@@ -350,10 +397,10 @@ rex.on("terminal.size_changed", function(ctx, ev)
 end)
 """
 
-// Rex keeps an agent "done" until it works again, where herdr turns it back to idle once you've looked at it.
-// So, like herdr, a Rex agent is done from when it finishes until you've seen its session in the Rex app.
+// Rex and cmux keep an agent "done" until it works again, where herdr turns it back to idle once you've looked at it.
+// So, like herdr, a Rex or cmux agent is done from when it finishes until you've seen its session or workspace.
 // ponytail: Local only, and anything that finished before the menu started counts as seen
-struct RexDone {
+struct DoneUntilSeen {
     var unseen: Set<String> = [] // blocks
     var last: [String: String] = [:] // block -> status at the last refresh
 
@@ -397,10 +444,11 @@ struct Machine: Equatable {
     var timeout: TimeInterval? { id == nil ? nil : 3 }
     func result(_ args: [String]) -> Result? { herdrResult(cmd(args), timeout: timeout) }
 
-    // rexVisible: the session the Rex app shows; rexUnseen: RexDone.arg. Both only known for Local.
-    func snapshot(rexVisible: String? = nil, rexUnseen: String? = nil) -> Snapshot? {
+    // rexVisible: the session the Rex app shows. done: to report what you've seen as idle, Local only.
+    func snapshot(rexVisible: String? = nil, done: DoneUntilSeen? = nil) -> Snapshot? {
+        if backend == .cmux { return cmuxSnapshot(done: done) }
         guard backend == .rex else { return result(["api", "snapshot"])?.snapshot }
-        let local = id == nil ? [rexVisible.map { "visible=" + $0 }, rexUnseen].compactMap { $0 } : []
+        let local = id == nil ? [rexVisible.map { "visible=" + $0 }, done?.arg].compactMap { $0 } : []
         let text = try? decoder.decode(String.self, from: run(cmd(["do", "-e", rexSnapshotScript] + local), exe: rexCLI, timeout: timeout).out)
         return text.flatMap { try? decoder.decode(Response.self, from: Data($0.utf8)) }?.result.snapshot
     }
@@ -426,6 +474,7 @@ struct SavedMachine: Decodable {
 // Local first, then every enabled saved machine; plus the one selected in the TUI, if any.
 // Rex: Local, then every host. The app can show several hosts at once, so none is selected.
 func loadMachines(_ backend: Backend) -> (all: [Machine], selected: Machine?) {
+    if backend == .cmux { return ([backend.local], nil) } // no remote machines
     if backend == .rex {
         let hosts = (try? decoder.decode(RexHosts.self, from: run(["hosts", "list", "--json"], exe: rexCLI).out))?.hosts ?? []
         return ([backend.local] + hosts.map { Machine(id: $0.host.label, name: $0.host.label, backend: .rex) }, nil)
@@ -493,7 +542,7 @@ func herdrTerminal() -> String? {
     return String(id)
 }
 
-func bringTerminalForward(_ backend: Backend) { bringForward(backend == .herdr ? herdrTerminal() : rexBundle) }
+func bringTerminalForward(_ backend: Backend) { bringForward(backend.bundle) }
 
 func bringForward(_ bundle: String?) {
     guard let bundle, let url = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first?.bundleURL else { return }
@@ -603,7 +652,7 @@ func rank(_ status: String?) -> Int {
 // The first choice is the default.
 enum Setting {
     static let backend = "backend", show = "show", machines = "machines"
-    static let backendChoices: [(value: String, title: String)] = [(value: "herdr", title: "herdr"), ("rex", "Rex")]
+    static let backendChoices = Backend.allCases.map { (value: $0.rawValue, title: $0.title) }
     static let showChoices: [(value: String, title: String)] = [(value: "both", title: "Agents and workspaces"), ("agents", "Agents only"), ("workspaces", "Workspaces only")]
     static let machineChoices: [(value: String, title: String)] = [(value: "all", title: "All together"), ("one", "One at a time")]
     // Which action sections show, each "on" (default) or "off": actions.workspace, actions.tab, actions.pane
@@ -638,13 +687,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var tuiSelected: Machine?
     var picked: Machine?
     var refreshing = false
-    // The menu drives whichever of herdr and Rex is open, or the picked one when both are
+    // The menu drives whichever of herdr, Rex and cmux is open, or the picked one when several are
     var running: [Backend] = []
     var backend: Backend { running.count == 1 ? running[0] : pickedBackend }
     // The session the Rex app shows, from rexVisibleScript, which runs while the Rex app is open
     var rexVisible: String?
     var rexWatcher: Process?
-    var rexDone = RexDone()
+    var done = DoneUntilSeen() // for Rex or cmux, whichever the menu drives
     var island: Island?
     var target: Machine {
         let pick = setting(Setting.machines) == "one" ? picked : nil
@@ -660,7 +709,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .herdr: menuBarIcons(Bundle.main.image(forResource: "sheep")
                 ?? NSImage(systemSymbolName: "rectangle.split.3x1", accessibilityDescription: "herdr")!),
             .rex: menuBarIcons(rexMascot() ?? NSImage(systemSymbolName: "terminal", accessibilityDescription: "Rex")!),
+            .cmux: menuBarIcons(NSImage(systemSymbolName: "square.split.2x2", accessibilityDescription: "cmux")!),
         ]
+        CmuxEvents.shared.watch()
         status.button?.image = icons[backend]?.plain
         dot.wantsLayer = true
         dot.layer?.cornerRadius = dotSize / 2
@@ -715,12 +766,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.island?.model.setHerdr(herdr, terminalInFront: herdrInFront)
                 self.machines = all
                 if selected != self.tuiSelected { self.tuiSelected = selected; self.picked = nil }
-                if b == .rex, let local = lists.first ?? nil {
-                    let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == rexBundle
-                    self.rexDone.update(local) { front && $0.workspaceId == self.rexVisible }
+                if b != .herdr, let local = lists.first ?? nil {
+                    let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == b.bundle
+                    let shown = b == .rex ? self.rexVisible : CmuxEvents.shared.state.showing
+                    self.done.update(local) { front && $0.workspaceId == shown }
                 }
                 let statuses = zip(all, lists).flatMap { m, list in
-                    (list ?? []).map { b == .rex && m.id == nil ? self.rexDone.status($0) : $0.agentStatus }
+                    (list ?? []).map { b != .herdr && m.id == nil ? self.done.status($0) : $0.agentStatus }
                 }
                 self.show(visible: visible, statuses: statuses.compactMap { $0 })
             }
@@ -729,7 +781,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // The notch island shows while herdr, the Rex app or cmux is open and Island › Show island is on
     func showIsland() {
-        let on = (!running.isEmpty || appRunning(cmuxBundle)) && setting(Setting.island) == "on"
+        let on = !running.isEmpty && setting(Setting.island) == "on"
         if on, island == nil { island = Island() }
         island?.show(on)
     }
@@ -778,7 +830,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
         let b = backend, rex = b == .rex
         for c in Setting.backendChoices where running.count > 1 {
-            let mi = menuItem(c.title, icon: c.value == "rex" ? "terminal" : "rectangle.split.3x1", action: #selector(choose(_:)))
+            let mi = menuItem(c.title, icon: ["rex": "terminal", "cmux": "square.split.2x2"][c.value] ?? "rectangle.split.3x1", action: #selector(choose(_:)))
             mi.representedObject = [Setting.backend, c.value]
             mi.state = c.value == b.rawValue ? .on : .off
             menu.addItem(mi)
@@ -788,7 +840,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if rex {
             let keymap = RexKeymap(json: run(["keymap", "--json"], exe: rexCLI).out)
             keys = keymap.keys(for:)
-        } else {
+        } else { // cmux's actions have no binding names, so herdr's lookup finds none
             let config = NSHomeDirectory() + "/.config/herdr/config.toml"
             keys = Keybinds(toml: (try? String(contentsOfFile: config, encoding: .utf8)) ?? "").keys(for:)
         }
@@ -798,8 +850,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let all = machines[0].backend == b ? machines : [b.local], multi = all.count > 1, target = all.contains(target) ? target : all[0]
         let together = !multi || setting(Setting.machines) == "all"
         let shown = together ? all : [target]
-        let rexVisible = rexVisible, rexUnseen = rexDone.arg
-        let snaps = fetch(shown) { $0.snapshot(rexVisible: rexVisible, rexUnseen: rexUnseen) }
+        let rexVisible = rexVisible, done = done
+        let snaps = fetch(shown) { $0.snapshot(rexVisible: rexVisible, done: done) }
         let list = setting(Setting.show)
         func names(_ snap: Snapshot?) -> [String: String] {
             Dictionary(((snap?.workspaces ?? []) + (snap?.tabs ?? [])).map { ($0.tabId ?? $0.workspaceId, $0.label) }) { first, _ in first }
@@ -829,7 +881,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 menu.addItem(listRow(n[a.workspaceId] ?? displayName(a), detail: (rex ? nil : n[a.tabId]) ?? displayName(a),
                                      status: a.agentStatus, focused: a.focused,
                                      command: Command(machine: m, args: rex ? rexShow(session: a.workspaceId, window: a.tabId, block: a.paneId)
-                                                                            : ["agent", "focus", a.paneId])))
+                                                                     : b == .cmux ? ["focus-panel", "--panel", a.paneId, "--workspace", a.workspaceId]
+                                                                     : ["agent", "focus", a.paneId])))
             }
         }
         if list != "workspaces" { menu.addItem(.separator()) }
@@ -847,7 +900,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let workspaces = list == "agents" ? [] : zip(shown, snaps).flatMap { m, snap in
             (snap?.workspaces ?? []).map { w in
                 listRow(w.label, detail: shown.count > 1 ? m.name : "", status: w.agentStatus, focused: w.focused,
-                        command: Command(machine: m, args: rex ? rexShow(session: w.workspaceId) : ["workspace", "focus", w.workspaceId]))
+                        command: Command(machine: m, args: rex ? rexShow(session: w.workspaceId)
+                                         : b == .cmux ? ["select-workspace", "--workspace", w.workspaceId] : ["workspace", "focus", w.workspaceId]))
             }
         }
         if list == "workspaces" {
@@ -859,12 +913,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(submenu(b.words("Switch workspace"), icon: symbol, tint: color, workspaces))
         }
 
-        let paneRows = rows(rex ? rexPaneActions : paneActions, on: target)
-            + (rex ? rexPaneSubmenus : paneSubmenus).map { s in submenu(s.title, icon: s.icon, s.actions.map { item($0, on: target) }) }
-            + [item(rex ? rexClosePane : closePane, on: target)]
+        let acts = actions(b)
+        let paneRows = rows(acts.pane, on: target)
+            + acts.paneMenus.map { s in submenu(s.title, icon: s.icon, s.actions.map { item($0, on: target) }) }
+            + (acts.close.map { [item($0, on: target)] } ?? [])
         let sections: [(kind: String, icon: String, name: String?, rows: [NSMenuItem])] = [
-            ("workspace", "macwindow", pane.flatMap { n[$0.workspaceId] }, rows(rex ? rexSessionActions : workspaceActions, on: target)),
-            ("tab", "rectangle.on.rectangle", pane.flatMap { n[$0.tabId] }, rows(rex ? rexTabActions : tabActions, on: target)),
+            ("workspace", "macwindow", pane.flatMap { n[$0.workspaceId] }, rows(acts.workspace, on: target)),
+            ("tab", "rectangle.on.rectangle", pane.flatMap { n[$0.tabId] }, rows(acts.tab, on: target)),
             ("pane", "square", pane.map { displayName($0) }, paneRows),
         ]
         for sec in sections where setting(Setting.section(sec.kind)) == "on" {
@@ -923,7 +978,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func rows(_ actions: [Action], on m: Machine) -> [NSMenuItem] {
         actions.flatMap { a -> [NSMenuItem] in
             guard a.title.hasSuffix("…") else { return [item(a, on: m)] }
-            let alt = item((String(a.title.dropLast()), a.icon, a.binding, a.args.filter { $0 != "--label" && $0 != "{label}" }), on: m)
+            var quick = a.args
+            if let i = quick.firstIndex(of: "{label}") { quick.removeSubrange(i - 1...i) } // the name and its flag
+            let alt = item((String(a.title.dropLast()), a.icon, a.binding, quick), on: m)
             alt.isAlternate = true
             alt.keyEquivalentModifierMask = .option
             return [item(a, on: m), alt]
@@ -1027,10 +1084,48 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func click(_ sender: NSMenuItem) {
         guard let command = sender.representedObject as? Command else { return }
         let m = command.machine
-        var args = command.args
+        guard let args = m.backend == .cmux ? cmuxArgs(command.args, title: sender.title) : herdrArgs(command.args, on: m) else { return }
+        let r = run(m.cmd(args), exe: m.backend.exe, timeout: m.id == nil ? nil : 10)
+        if r.ok { bringTerminalForward(m.backend) } else { alert(r.err.isEmpty ? "\(m.backend.title) \(m.cmd(args).joined(separator: " ")) failed" : r.err) }
+    }
+
+    // cmux: fill in {pane} and {workspace} with the focused ones, confirm closing a workspace, and ask for
+    // a name for "…" rows. Showing an agent switches to its workspace first. Nil when cancelled.
+    func cmuxArgs(_ command: [String], title: String) -> [String]? {
+        var args = command
+        if args.first == "focus-panel" { _ = run(["select-workspace", "--workspace", args[4]], exe: Backend.cmux.exe) }
+        let focus = cmuxFocused()
+        if !Set(["{pane}", "{workspace}"]).isDisjoint(with: args) {
+            guard let focus else { alert("Couldn't find the focused cmux pane."); return nil }
+            args = args.map { ["{pane}": focus.pane, "{workspace}": focus.workspace][$0] ?? $0 }
+        }
+        if args.first == "close-workspace" {
+            guard ask("Close the workspace “\(focus?.workspaceName ?? "workspace")”?", "This ends everything running in it.",
+                      button: "Close Workspace", destructive: true) else { return nil }
+        }
+        if let i = args.firstIndex(of: "{label}") {
+            let renaming = args.contains("rename")
+            let field = NSTextField(string: renaming ? (args.first == "tab-action" ? focus?.tabName : focus?.workspaceName) ?? "" : "")
+            field.frame = NSRect(x: 0, y: 0, width: 240, height: 24)
+            guard ask(String(title.dropLast()), "", button: renaming ? "Rename" : "Create", field: field) else { return nil }
+            if !field.stringValue.isEmpty {
+                args[i] = field.stringValue
+            } else if renaming {
+                return nil
+            } else {
+                args.removeSubrange(i - 1...i) // no name: let cmux choose
+            }
+        }
+        return args
+    }
+
+    // herdr (and Rex, whose actions need none of this): fill in the focused ids, confirm closing, and ask
+    // for a name. Nil when cancelled.
+    func herdrArgs(_ command: [String], on m: Machine) -> [String]? {
+        var args = command
         var pane: Pane?
         if !Set(["{pane}", "{tab}", "{workspace}"]).isDisjoint(with: args) {
-            guard let p = m.result(["pane", "current"])?.pane else { return alert("Couldn't find the focused herdr pane on \(m.name).") }
+            guard let p = m.result(["pane", "current"])?.pane else { alert("Couldn't find the focused herdr pane on \(m.name)."); return nil }
             pane = p
             let ids = ["{pane}": p.paneId, "{tab}": p.tabId, "{workspace}": p.workspaceId]
             args = args.map { ids[$0] ?? $0 }
@@ -1039,7 +1134,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // style it as destructive, and keep Return on Cancel.
         if args.starts(with: ["pane", "close"]), let pane, let agent = pane.agent {
             guard ask("Close this pane?", "This ends the \(agent) agent running in “\(displayName(pane))”.",
-                      button: "Close Pane", destructive: true) else { return }
+                      button: "Close Pane", destructive: true) else { return nil }
         }
         // Closing or renaming a tab or workspace: args are [kind, verb, id, …], and `<kind> get <id>`
         // gives the current name and pane count
@@ -1054,21 +1149,20 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let who = agents.count == 1 ? "the \(agents[0]) agent" : "\(agents.count) agents (\(agents.joined(separator: ", ")))"
             guard ask("Close the \(kind) “\(group?.label ?? kind)”?",
                       agents.isEmpty ? "This ends \(ending)." : "This ends \(ending), including \(who) running there.",
-                      button: "Close \(kind.capitalized)", destructive: true) else { return }
+                      button: "Close \(kind.capitalized)", destructive: true) else { return nil }
         }
         if let i = args.firstIndex(of: "{label}") {
             let creating = args[1] == "create"
             let field = NSTextField(string: group?.label ?? "") // renaming: prefilled with the current name
             field.frame = NSRect(x: 0, y: 0, width: 240, height: 24)
-            guard ask(creating ? "New \(kind)" : "Rename \(kind)", "", button: creating ? "Create" : "Rename", field: field) else { return }
+            guard ask(creating ? "New \(kind)" : "Rename \(kind)", "", button: creating ? "Create" : "Rename", field: field) else { return nil }
             if creating && field.stringValue.isEmpty {
                 args.removeSubrange(i - 1...i) // no name: drop --label and let herdr choose
             } else {
                 args[i] = field.stringValue
             }
         }
-        let r = run(m.cmd(args), exe: m.backend.exe, timeout: m.id == nil ? nil : 10)
-        if r.ok { bringTerminalForward(m.backend) } else { alert(r.err.isEmpty ? "\(m.backend.title) \(m.cmd(args).joined(separator: " ")) failed" : r.err) }
+        return args
     }
 
     // Not NSApplication.terminate directly: macOS 26 gives that selector its own menu icon,
@@ -1166,7 +1260,7 @@ func selfTest() -> Never {
     let agent = { (status: String) in
         Pane(paneId: "b1", tabId: "w1", workspaceId: "s1", agent: "claude", agentStatus: status, terminalTitleStripped: nil, cwd: nil, focused: nil)
     }
-    var done = RexDone()
+    var done = DoneUntilSeen()
     done.update([agent("done")]) { _ in false } // already done when the menu started: counts as seen
     precondition(done.status(agent("done")) == "idle" && done.arg == "unseen=none")
     done.update([agent("working")]) { _ in false }
@@ -1192,6 +1286,13 @@ func selfTest() -> Never {
         #"{"name":"surface.closed","workspace_id":"w1","surface_id":"s2","payload":{}}"#,
     ] { cmux.apply(try! decoder.decode(CmuxEvent.self, from: Data(line.utf8))) }
     precondition(cmux.items.isEmpty)
+    // cmux's tree as herdr's snapshot: each tab is a tab and a pane, an agent when it reports a status
+    let tree = try! decoder.decode(CmuxTree.self, from: Data(#"{"windows":[{"active":true,"workspaces":[{"id":"w1","title":"api","selected":true,"panes":[{"id":"p1","focused":true,"surfaces":[{"id":"s1","title":"claude","focused":true},{"id":"s2","title":"zsh","focused":false}]}]}]}]}"#.utf8))
+    cmux.apply(try! decoder.decode(CmuxEvent.self, from: Data(#"{"name":"program_status.changed","workspace_id":"w1","surface_id":"s1","payload":{"records":[{"id":"","kind":"none","state":"done"}]}}"#.utf8)))
+    let cs = cmuxSnapshot(tree, cmux, done: nil)
+    precondition(cs.workspaces[0].label == "api" && cs.workspaces[0].focused == true && cs.workspaces[0].paneCount == 2)
+    precondition(cs.agents.map(\.paneId) == ["s1"] && cs.panes.first { $0.focused == true }?.paneId == "s1" && cs.tabs.count == 2)
+    precondition(cmuxSnapshot(tree, cmux, done: DoneUntilSeen()).agents[0].agentStatus == "idle") // done but seen
     print("self-test ok")
     exit(0)
 }
